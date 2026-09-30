@@ -161,6 +161,7 @@ main(){
   banner
   [[ -f "$SOURCE_DIR/azzx_cli.py" ]] || die "azzx_cli.py is missing."
   [[ -f "$SOURCE_DIR/requirements.txt" ]] || die "requirements.txt is missing."
+  [[ -d "$SOURCE_DIR/azzx" ]] || die "azzx/ package directory is missing (required for v10)."
 
   if [[ "$CHECK_ONLY" -eq 1 ]]; then
     find_python || true
@@ -191,6 +192,23 @@ main(){
   for f in README.md README_ID.md INSTALL.md CHANGELOG.md VERSION; do
     [[ -f "$SOURCE_DIR/$f" ]] && cp "$SOURCE_DIR/$f" "$APP_DIR/$f"
   done
+
+  # v10 modular package (toolkit, workflow, device, plugins, agent)
+  if [[ -d "$SOURCE_DIR/azzx" ]]; then
+    info "Installing azzx Python package..."
+    rm -rf "$APP_DIR/azzx"
+    cp -a "$SOURCE_DIR/azzx" "$APP_DIR/azzx"
+    # drop bytecode if any
+    find "$APP_DIR/azzx" -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+  else
+    warn "Package directory azzx/ missing — v7–v10 toolkit/mirror commands will not work."
+  fi
+
+  # optional examples for plugin demos
+  if [[ -d "$SOURCE_DIR/examples" ]]; then
+    rm -rf "$APP_DIR/examples"
+    cp -a "$SOURCE_DIR/examples" "$APP_DIR/examples"
+  fi
 
   info "Creating isolated Python environment..."
   rm -rf "$VENV_DIR"
@@ -232,6 +250,12 @@ exec "$VENV_DIR/bin/python" "$APP_DIR/azzx_cli.py" "\$@"
 LAUNCHER
   chmod +x "$launcher"
   chmod +x "$APP_DIR/azzx_cli.py" 2>/dev/null || true
+
+  # Verify v10 package is importable from install location (catches missing azzx/)
+  if ! "$VENV_DIR/bin/python" -c "import sys; sys.path.insert(0, r'$APP_DIR'); import azzx; assert azzx.__version__" 2>/dev/null; then
+    die "Installed files are incomplete: package 'azzx' could not be imported from $APP_DIR. Re-extract the release zip and ensure the azzx/ folder is present."
+  fi
+
 
   ok "$APP_NAME v$APP_VERSION installed."
   log ""
