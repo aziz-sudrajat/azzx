@@ -86,8 +86,8 @@ def _validate_steps(steps: list[Any]) -> list[dict[str, Any]]:
             raise AzzxError(f"Step {i} args must be an object")
         # Reject any attempt to inject shell
         for banned in ("shell", "command", "cmd", "script", "eval"):
-            if banned in args and tool not in {"sys.info"}:  # no special case really needed
-                pass
+            if banned in args:
+                raise AzzxError(f"Step {i} contains forbidden argument: {banned}")
         clean.append({"tool": tool, "args": args})
     return clean
 
