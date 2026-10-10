@@ -5,7 +5,7 @@ and execute tasks autonomously, and run it on anything from a flagship PC to a
 low-end "kentang" laptop or an Android phone with Termux.
 
 ```bash
-pip install ./azzx              # or: bash install.sh
+bash install.sh                 # installs to ~/.local/share, adds the `azzx` command
 azzx setup                      # tell AZZX your name (stored locally, privately)
 azzx chat                       # talk to your companion
 azzx auto "organize my downloads folder"   # autonomous: plan → approve → execute → learn
@@ -71,12 +71,14 @@ your phone via Telegram.
 **Requirements:** Python 3.10+, ~50 MB disk, ~100 MB RAM free. That's it.
 
 ```bash
-# Option A — pip (recommended)
-pip install ./azzx
-# Option B — installer script
+# Recommended — installer script (venv + deps + `azzx` launcher on PATH)
 bash install.sh
-# Option C — Termux (Android)
-pkg install python git && pip install ./azzx
+# Termux (Android)
+pkg install python git && bash install.sh
+# Manual (tanpa installer): butuh Python 3.10+
+python3 -m venv .venv && . .venv/bin/activate
+pip install httpx rich
+python3 azzx_cli.py --version
 ```
 
 Check the installation:

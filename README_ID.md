@@ -5,7 +5,7 @@ dia merencanakan dan mengeksekusi tugas secara mandiri, dan jalankan di mana saj
 dari PC kentang sampai HP Android dengan Termux.
 
 ```bash
-pip install ./azzx              # atau: bash install.sh
+bash install.sh                 # install ke ~/.local/share + perintah `azzx`
 azzx setup                      # kenalkan namamu (tersimpan lokal, privat)
 azzx chat                       # ngobrol dengan companion
 azzx auto "rapikan folder download"   # otonom: rencana → setujui → eksekusi → belajar
@@ -56,12 +56,14 @@ bahkan bisa dihubungi dari HP lewat Telegram.
 **Syarat:** Python 3.10+, ~50 MB disk, ~100 MB RAM. Itu saja.
 
 ```bash
-# Opsi A — pip (disarankan)
-pip install ./azzx
-# Opsi B — script installer
+# Disarankan — script installer (venv + dep + launcher `azzx` di PATH)
 bash install.sh
-# Opsi C — Termux (Android)
-pkg install python git && pip install ./azzx
+# Termux (Android)
+pkg install python git && bash install.sh
+# Manual (tanpa installer): butuh Python 3.10+
+python3 -m venv .venv && . .venv/bin/activate
+pip install httpx rich
+python3 azzx_cli.py --version
 ```
 
 Cek instalasi:
