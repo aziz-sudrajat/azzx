@@ -57,7 +57,7 @@ from rich.text import Text
 
 APP_NAME = "AZZATSSINS LITE AGENT"
 APP_SLUG = "azzatssins-lite-agent"
-VERSION = "10.6.0"
+VERSION = "10.6.3"
 
 console = Console(highlight=False)
 
@@ -938,7 +938,17 @@ def format_file_context(root: Path, selected: list[Path], max_chars: int) -> str
         if used + len(chunk) > max_chars:
             remaining = max_chars - used
             if remaining > 1000:
-                chunks.append(chunk[:remaining] + "\n...[truncated by AZZX]...\n")
+                # Smart compression instead of crude truncation (v10.6.3).
+                try:
+                    from azzx.agent.compressor import compress_text
+                    res = compress_text(content, remaining - 200, "auto",
+                                        filename=path.name)
+                    chunks.append(
+                        f"\n===== FILE: {rel} (compressed: {res['strategy']}, "
+                        f"{res['ratio']*100:.0f}% of original) =====\n"
+                        f"{res['text']}\n===== END FILE: {rel} =====\n")
+                except Exception:
+                    chunks.append(chunk[:remaining] + "\n...[truncated by AZZX]...\n")
             break
         chunks.append(chunk)
         used += len(chunk)
@@ -5232,6 +5242,23 @@ def build_parser() -> argparse.ArgumentParser:
     wa.add_argument("--start-url", default=None)
     wa.add_argument("--max-steps", type=int, default=12)
     wa.add_argument("--verbose", action="store_true")
+    au = sub.add_parser("audit", help="Audit the agent: record all work, judge correctness")
+    au_sub = au.add_subparsers(dest="audit_action")
+    au_l = au_sub.add_parser("list", help="Recent audited tool calls")
+    au_l.add_argument("--limit", type=int, default=30)
+    au_l.add_argument("--run", default="")
+    au_sub.add_parser("stats", help="Aggregate audit statistics")
+    au_r = au_sub.add_parser("report", help="Rule-based audit report for one run")
+    au_r.add_argument("--run", default="", required=True)
+    au_r.add_argument("--judge", action="store_true", help="Ask the AI provider for a verdict")
+    au_r.add_argument("--verbose", action="store_true")
+    cp = sub.add_parser("compress", help="Shrink big files before they enter AI context")
+    cp.add_argument("file")
+    cp.add_argument("--budget", type=int, default=8000, help="Max chars of output")
+    cp.add_argument("--strategy", default="auto",
+                    choices=["auto", "signatures", "extractive", "head_tail", "summarize"])
+    cp.add_argument("--query", default="", help="Focus for extractive/summarize")
+    cp.add_argument("--quiet", action="store_true", help="Only show stats")
     cn = sub.add_parser("connector", help="App connectors (GitHub, email)")
     cn_sub = cn.add_subparsers(dest="connector_action")
     cn_sub.add_parser("list", help="List configured connectors")
@@ -5889,6 +5916,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "webauto":
             from azzx.cli_v10 import cmd_webauto
             return cmd_webauto(args)
+        elif args.command == "audit":
+            from azzx.cli_v10 import cmd_audit
+            return cmd_audit(args)
+        elif args.command == "compress":
+            from azzx.cli_v10 import cmd_compress
+            return cmd_compress(args)
         elif args.command == "connector":
             from azzx.cli_v10 import cmd_connector
             return cmd_connector(args)

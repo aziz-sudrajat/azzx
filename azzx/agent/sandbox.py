@@ -60,6 +60,16 @@ def _scrub_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not _SECRET_ENV_RE.search(k)}
 
 
+def _is_android() -> bool:
+    """True on Android/Termux. Bionic aborts (SIGABRT) processes whose
+    address space is capped, so RLIMIT_AS must be skipped there."""
+    return (
+        "ANDROID_ROOT" in os.environ
+        or "com.termux" in os.environ.get("PREFIX", "")
+        or os.path.exists("/system/build.prop")
+    )
+
+
 def _posix_limits(timeout: int):
     try:
         import resource
@@ -69,6 +79,10 @@ def _posix_limits(timeout: int):
                 resource.setrlimit(resource.RLIMIT_CPU, (timeout + 10, timeout + 10))
             except Exception:
                 pass
+            if _is_android():
+                # Bionic SIGABRTs when RLIMIT_AS is capped; rely on the
+                # wall-clock timeout + RLIMIT_CPU instead.
+                return
             try:
                 # 512 MiB address-space cap
                 mem = 512 * 1024 * 1024
