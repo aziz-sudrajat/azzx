@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AZZX — Sahabat AI Pribadimu</title>
+<style>
+:root{
+  --bg:#16181d; --panel:#1e2129; --panel2:#262a34; --border:#333947;
+  --text:#e8eaf0; --muted:#9aa1b2; --accent:#6c8cff; --accent2:#8a6cff;
+  --user:#2f5fe0; --radius:16px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;overflow:hidden}
+aside{width:264px;min-width:264px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 14px;gap:10px}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 14px}
+.logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#fff}
+.brand b{font-size:17px}.brand small{display:block;color:var(--muted);font-weight:400;font-size:11px}
+.btn{display:flex;align-items:center;gap:10px;width:100%;padding:11px 13px;border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;font-size:13.5px;text-align:left;transition:.15s}
+.btn:hover{border-color:var(--accent);background:#2b3040}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;color:#fff;font-weight:600}
+.btn.primary:hover{filter:brightness(1.1)}
+.side-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:8px 8px 0}
+.side-foot{margin-top:auto;padding:10px 8px 0;color:var(--muted);font-size:11.5px;line-height:1.6}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3ddc84;margin-right:6px}
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+header{padding:14px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+header .st{font-size:13px;color:var(--muted)}
+#msgs{flex:1;overflow-y:auto;padding:26px 22px;display:flex;flex-direction:column;gap:16px;max-width:860px;width:100%;margin:0 auto}
+.msg{max-width:82%;padding:13px 17px;border-radius:var(--radius);line-height:1.65;font-size:14.5px;white-space:pre-wrap;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:var(--user);color:#fff;border-bottom-right-radius:5px}
+.msg.ai{align-self:flex-start;background:var(--panel2);border:1px solid var(--border);border-bottom-left-radius:5px}
+.msg.ai code{background:#14161b;padding:2px 7px;border-radius:6px;font-size:13px;font-family:ui-monospace,monospace}
+.msg.ai pre{background:#14161b;padding:12px;border-radius:10px;overflow:auto;margin:8px 0}
+.msg.ai pre code{background:none;padding:0}
+.msg.ai b{color:#fff}
+.hero{text-align:center;margin:auto;max-width:520px;color:var(--muted)}
+.hero .big{width:72px;height:72px;border-radius:22px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:800;color:#fff;margin:0 auto 18px}
+.hero h1{color:var(--text);font-size:24px;margin-bottom:8px}
+.hero p{font-size:14px;line-height:1.7}
+.chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+.chip{padding:9px 15px;border:1px solid var(--border);border-radius:999px;background:var(--panel2);color:var(--text);font-size:13px;cursor:pointer;transition:.15s}
+.chip:hover{border-color:var(--accent)}
+.typing{align-self:flex-start;background:var(--panel2);border:1px solid var(--border);padding:14px 18px;border-radius:var(--radius);border-bottom-left-radius:5px;display:flex;gap:6px}
+.typing span{width:8px;height:8px;border-radius:50%;background:var(--muted);animation:bl 1.2s infinite}
+.typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+@keyframes bl{0%,60%,100%{opacity:.25}30%{opacity:1}}
+#bar{padding:16px 22px 20px;max-width:860px;width:100%;margin:0 auto}
+#form{display:flex;gap:10px;background:var(--panel2);border:1px solid var(--border);border-radius:18px;padding:8px 8px 8px 18px;align-items:center}
+#form:focus-within{border-color:var(--accent)}
+#inp{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:15px;padding:10px 0;resize:none;max-height:140px;font-family:inherit}
+#send{width:44px;height:44px;border-radius:14px;border:none;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-size:18px;cursor:pointer;flex-shrink:0}
+#send:disabled{opacity:.5;cursor:default}
+.hint{text-align:center;color:var(--muted);font-size:11.5px;margin-top:10px}
+@media(max-width:760px){aside{display:none}.msg{max-width:92%}}
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand"><div class="logo">A</div><div><b>AZZX</b><small>sahabat AI pribadimu</small></div></div>
+  <button class="btn primary" id="newchat">＋ Chat baru</button>
+  <div class="side-label">Aksi cepat</div>
+  <button class="btn" data-q="Buatkan rencana untuk: ">📋 Buat rencana</button>
+  <button class="btn" data-q="Jalankan secara otonom: ">🚀 Tugas otonom</button>
+  <button class="btn" data-q="Cek kesehatan sistem lalu ringkas">💚 Cek kesehatan</button>
+  <button class="btn" data-q="Apa yang kamu pelajari sejauh ini?">🧠 Lihat pembelajaran</button>
+  <div class="side-foot"><span class="dot"></span><span id="status">menghubungi…</span><br>Semua data tersimpan lokal di perangkatmu.</div>
+</aside>
+<main>
+  <header><div class="logo" style="width:32px;height:32px;font-size:15px;border-radius:10px">A</div><div><b>AZZX</b> <span class="st">· online · ingat kamu</span></div></header>
+  <div id="msgs">
+    <div class="hero" id="hero">
+      <div class="big">A</div>
+      <h1>Halo! Aku AZZX 👋</h1>
+      <p>Sahabat AI pribadimu. Aku bisa ngobrol, membuat rencana, menjalankan tugas
+      secara mandiri, mengingat yang kamu ajarkan, dan banyak lagi — semua dari sini.</p>
+      <div class="chips">
+        <button class="chip" data-q="Cek kesehatan sistem">💚 Cek sistem</button>
+        <button class="chip" data-q="Buatkan rencana untuk merapikan folder download">📋 Contoh rencana</button>
+        <button class="chip" data-q="Kemampuan apa saja yang kamu punya?">✨ Kemampuanmu</button>
+      </div>
+    </div>
+  </div>
+  <div id="bar">
+    <form id="form">
+      <textarea id="inp" rows="1" placeholder="Tulis pesan untuk AZZX…"></textarea>
+      <button id="send" type="submit" title="Kirim">➤</button>
+    </form>
+    <div class="hint">AZZX bisa salah — verifikasi hal penting. Jangan pernah kirim password/API key.</div>
+  </div>
+</main>
+<script>
+const msgs=document.getElementById('msgs'), form=document.getElementById('form'),
+      inp=document.getElementById('inp'), send=document.getElementById('send'),
+      hero=document.getElementById('hero');
+fetch('/api/health').then(r=>r.json()).then(x=>{
+  document.getElementById('status').textContent='online · v'+x.version;
+}).catch(()=>{document.getElementById('status').textContent='offline?';});
+function md(t){
+  t=t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  t=t.replace(/```(\w*)\n([\s\S]*?)```/g,'<pre><code>$2</code></pre>');
+  t=t.replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>');
+  t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
+  return t;
+}
+function addMsg(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
+function clearHero(){if(hero)hero.remove();}
+let busy=false;
+async function sendMsg(text){
+  text=(text||'').trim();if(!text||busy)return;
+  clearHero();busy=true;send.disabled=true;
+  addMsg('user',md(text));inp.value='';inp.style.height='auto';
+  const tp=document.createElement('div');tp.className='typing';tp.innerHTML='<span></span><span></span><span></span>';
+  msgs.appendChild(tp);msgs.scrollTop=msgs.scrollHeight;
+  const bubble=addMsg('ai','');bubble.style.display='none';let raw='';
+  try{
+    const es=await fetch('/api/chat/stream?message='+encodeURIComponent(text));
+    const rd=es.body.getReader(),dec=new TextDecoder();let buf='';
+    while(true){
+      const {done,value}=await rd.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let i;while((i=buf.indexOf('\n\n'))>=0){
+        const chunk=buf.slice(0,i);buf=buf.slice(i+2);
+        for(const line of chunk.split('\n')){
+          if(!line.startsWith('data:'))continue;
+          const data=line.slice(5).trim();
+          if(data==='[DONE]')break;
+          try{const o=JSON.parse(data);
+            if(o.token){raw+=o.token;tp.remove();bubble.style.display='';bubble.innerHTML=md(raw);msgs.scrollTop=msgs.scrollHeight;}
+            if(o.error){tp.remove();bubble.style.display='';bubble.innerHTML='⚠️ '+md(o.error);}
+          }catch(e){}
+        }
+      }
+    }
+    tp.remove();
+    if(!raw){bubble.style.display='';bubble.innerHTML='(tidak ada jawaban)';}
+  }catch(e){
+    tp.remove();bubble.style.display='';bubble.innerHTML='⚠️ Gagal menghubungi AZZX: '+md(String(e));
+  }
+  busy=false;send.disabled=false;inp.focus();
+}
+form.addEventListener('submit',e=>{e.preventDefault();sendMsg(inp.value);});
+inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg(inp.value);}});
+inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,140)+'px';});
+document.querySelectorAll('[data-q]').forEach(b=>b.addEventListener('click',()=>{inp.value=b.dataset.q;inp.focus();inp.style.height='auto';}));
+document.getElementById('newchat').addEventListener('click',()=>location.reload());
+inp.focus();
+</script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-"""AZZX v10.4 agent layer — one unified agent.
+"""AZZX v10.5 agent layer — one unified, autonomous agent.
 
 Native capabilities, integrated into AZZX's normal workflows (no separate
 modes or competing CLIs):
@@ -12,6 +12,15 @@ modes or competing CLIs):
 - tasks: background task queue with detached drainer, cancel/interrupt/resume
 - skills: validated, trust-gated native skill registry
 - scheduler: persistent interval scheduler for registered tools
+- sandbox: confined command execution (local + docker backends)
+- planning: explicit tool-grounded plans + agent todo list
+- learning: post-task distillation into staged memory/skill proposals
+- checkpoints: snapshot/rollback before destructive work
+- autonomy: plan -> approve -> execute -> learn loop (azzx auto)
+- webreader: lightweight page fetch + DDG search (no JS)
+- webagent: autonomous goal-driven browsing loop (azzx webauto)
+- connectors: GitHub + email app connectors
+- cronutil: dependency-free cron expression parsing
 - reasoning/tracer/streaming/vision/message_bus: supporting infrastructure
 """
 
@@ -50,7 +59,18 @@ from .providers import (
     classify_http_error,
     default_router,
 )
+from .autonomy import AutonomousRunner
+from .checkpoints import create as create_checkpoint, list_checkpoints, prune as prune_checkpoints, rollback as rollback_checkpoint
+from .companion import companion_system_prompt, get_profile, remember_fact, save_profile
+from .learning import approve as approve_learned, discard as discard_learned, distill as distill_learnings, list_pending as list_pending_learnings
+from .mcp import register_mcp_tools
+from .webreader import fetch as web_fetch, register_webreader_tools, search as web_search
+from .webagent import WebAgent
+from .connectors import register_connector_tools
+from .cronutil import describe_cron, next_cron_time, parse_cron
+from .planning import TodoList, generate_plan, get_todo_list, load_plan, render_plan_text
 from .reasoning import ReasoningTrace, ThoughtStep, STEP_KINDS
+from .sandbox import SandboxExecutor, SandboxResult, get_sandbox_executor
 from .scheduler import ToolScheduler
 from .session import SESSION_STATUSES, SessionMemoryJournal, SessionSnapshot, get_session_journal
 from .skills import SkillError, SkillRegistry, register_skill_tools, validate_args, validate_manifest

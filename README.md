@@ -1,1409 +1,402 @@
-# AZZATSSINS LITE AGENT (AZZX) v10.4.0
+# AZZX v10.6 — Your Personal AI Agent
 
-**Terminal-first AI engineering agent** for Termux and Linux.
-
-AZZX works from any directory: AI coding, software factory, universal app installer, system toolkit, safe workflows, plugins, and Android screen mirroring.
+**One unified AI agent for your terminal.** Chat with it like a friend, let it plan
+and execute tasks autonomously, and run it on anything from a flagship PC to a
+low-end "kentang" laptop or an Android phone with Termux.
 
 ```bash
-cd ~/my-project
-azzx
+pip install ./azzx              # or: bash install.sh
+azzx setup                      # tell AZZX your name (stored locally, privately)
+azzx chat                       # talk to your companion
+azzx auto "organize my downloads folder"   # autonomous: plan → approve → execute → learn
 ```
 
-```text
-User / Natural language
-        ↓
-AI Orchestrator (multi-provider coding agent)
-        ↓  structured tool calls only
-Tool Registry (deterministic executors)
-        ↓  permission + validation
-OS / workspace / Android device
-```
-
-[![Version](https://img.shields.io/badge/version-10.4.0-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.5.0-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
+[![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
+> 🇮🇩 Baca versi Bahasa Indonesia di [README_ID.md](./README_ID.md).
 
 ---
 
 ## Table of contents
 
 1. [What is AZZX?](#1-what-is-azzx)
-2. [Version evolution (v1 → v10)](#2-version-evolution-v1--v10)
-3. [Installation](#3-installation)
-4. [Upgrade from v6](#4-upgrade-from-v6)
-5. [First run & AI configuration](#5-first-run--ai-configuration)
-6. [Command structure](#6-command-structure)
-7. [v1 — AI CLI foundation](#7-v1--ai-cli-foundation)
-8. [v2 — AI coding agent](#8-v2--ai-coding-agent)
-9. [v3 — Software engineer agent](#9-v3--software-engineer-agent)
-10. [v4 — Software factory](#10-v4--software-factory)
-11. [v5 — Advanced engineering agent](#11-v5--advanced-engineering-agent)
-12. [v6 — Universal Application Installer](#12-v6--universal-application-installer)
-13. [v7 — Universal Toolkit](#13-v7--universal-toolkit)
-14. [v8 — Automation & device (mirror)](#14-v8--automation--device-mirror)
-15. [v9 — Plugins & extensibility](#15-v9--plugins--extensibility)
-16. [v10 — Universal Agent Layer](#16-v10--universal-agent-layer)
-17. [AI providers](#17-ai-providers)
-18. [Permissions & safety](#18-permissions--safety)
-19. [Recommended workflows](#19-recommended-workflows)
-20. [Troubleshooting](#20-troubleshooting)
-21. [Quick command reference](#21-quick-command-reference)
-22. [Project layout](#22-project-layout)
-23. [Limitations](#23-limitations)
-24. [License / contributing](#24-license--contributing)
+2. [Install (2 minutes, works on low-end machines)](#2-install)
+3. [Quick start](#3-quick-start)
+4. [Command reference](#4-command-reference)
+   - [Companion & chat](#companion--chat)
+   - [Autonomous agent](#autonomous-agent)
+   - [Planning & learning](#planning--learning)
+   - [Memory](#memory)
+   - [Sandboxed execution](#sandboxed-execution)
+   - [Scheduling](#scheduling)
+   - [Skills & MCP](#skills--mcp)
+   - [Sessions & checkpoints](#sessions--checkpoints)
+   - [Background queue](#background-queue)
+   - [Coding & engineering](#coding--engineering)
+   - [System toolkit](#system-toolkit)
+   - [Android device](#android-device)
+   - [Safety & permissions](#safety--permissions)
+   - [Utilities](#utilities)
+5. [How it works (architecture)](#5-how-it-works)
+6. [Configuration](#6-configuration)
+7. [FAQ](#7-faq)
 
 ---
 
 ## 1. What is AZZX?
 
-AZZX combines:
+AZZX is a **terminal-first personal AI agent**. Unlike a chatbot, it can *act*:
+run commands in a sandbox, write a plan and execute it step by step, remember
+what you teach it, distill new skills from experience, and message you from
+your phone via Telegram.
 
-| Area | Capabilities |
-|------|----------------|
-| **AI** | Chat, coding, review, debug, multi-agent roles, multi-provider fallback |
-| **Engineering** | Map, tests, security, Git, checkpoints, sandbox, factory, release |
-| **Apps** | Install / update / repair / uninstall via native package managers |
-| **Toolkit** | Files, hash, archive, JSON, FFmpeg, network, processes, health |
-| **Automation** | Workflows limited to registered tools; persistent interval schedules for registered tools |
-| **Device** | ADB detect, Termux API detect, scrcpy screen mirror |
-| **Extensibility** | Plugins (`manifest.json`), skills, MCP |
+**Design principles**
 
-Main executable:
-
-```bash
-azzx
-```
-
-**Do not** run the whole app as root (`sudo azzx`). Privileged package ops use `sudo`/`doas` only when needed for that step.
+- **One agent, no modes.** Everything is a native command of the same agent.
+- **Lightweight.** Only 2 Python dependencies (`httpx`, `rich`). The smarts come
+  from your AI provider (API), so even a potato laptop runs a first-class agent.
+- **Deny-first safety.** An explicit `deny` permission cannot be bypassed by
+  `-y`, queues, workflows, or autonomous runs. Ever.
+- **Trust-gated skills.** New skills install *untrusted and disabled*; you
+  review, then `trust` + `enable`.
+- **Private by default.** Memory, profile and API keys stay on your machine.
 
 ---
 
-## 2. Version evolution (v1 → v10)
+## 2. Install
 
-Versions are **cumulative** — later releases keep earlier capabilities.
-
-```text
-v1  AI CLI foundation
- ↓
-v2  AI Coding Agent
- ↓
-v3  Software Engineer Agent
- ↓
-v4  Software Factory
- ↓
-v5  Advanced Engineering (sandbox, permissions, MCP)
- ↓
-v6  Universal Application Installer
- ↓
-v7  Universal Toolkit (files, system, network, media)
- ↓
-v8  Automation & Device (workflows, ADB, scrcpy mirror)
- ↓
-v9  Extensibility (manifest plugins, tool registry hooks)
- ↓
-v10 Universal Agent Layer (AI orchestrator + deterministic tools)
-```
-
-| Version | Main focus |
-|---------|------------|
-| v1 | AI CLI, chat, provider setup |
-| v2 | Read/edit project, fix/add/implement |
-| v3 | Map, review, test, debug, security, Git |
-| v4 | Spec, roadmap, factory, CI, db |
-| v5 | Sandbox, permissions, MCP, skills, dashboard |
-| v6 | `install` / distro package managers / Application Center |
-| v7 | `toolkit` / `tools` / file-system & health utilities |
-| v8 | `workflow` / `mirror` (scrcpy) / ADB & Termux detect |
-| v9 | Plugin `manifest.json` + install/load |
-| v10 | Central tool registry; NL shortcuts; modular `azzx/` package |
-| v10.3 | Task queue race fixes, atomic state persistence, persistent tool scheduler, GitHub CI |
-
----
-
-## 3. Installation
-
-### Requirements
-
-- Python **3.10+**
-- Linux or **Termux**
-- Optional: `git`, `ffmpeg`, `scrcpy`, `adb`, `cryptography`
-
-### Install from zip
+**Requirements:** Python 3.10+, ~50 MB disk, ~100 MB RAM free. That's it.
 
 ```bash
-unzip AZZATSSINS_LITE_AGENT_v10.4.0.zip
-cd AZZATSSINS_LITE_AGENT_v10.0
-chmod +x *.sh
-./install.sh --check
-./install.sh
+# Option A — pip (recommended)
+pip install ./azzx
+# Option B — installer script
+bash install.sh
+# Option C — Termux (Android)
+pkg install python git && pip install ./azzx
 ```
 
-```bash
-azzx --version
-# AZZATSSINS LITE AGENT 10.4.0
-```
-
-### Installer flags
-
-| Flag | Meaning |
-|------|---------|
-| `--check` | Detect OS / package manager only |
-| `--no-system-deps` | Skip apt/pacman/pkg system packages |
-| `--no-crypto` | Skip optional encrypted vault |
-
-**Important:** the installer must copy the `azzx/` Python package next to `azzx_cli.py`. If `azzx tools list` fails with `No module named 'azzx'`, re-run `./install.sh` from a complete extract (folder `azzx/` must exist).
-
-### Uninstall
+Check the installation:
 
 ```bash
-./uninstall.sh          # keep config & API keys
-./uninstall.sh --purge  # also delete config
-```
-
----
-
-## 4. Upgrade from v6
-
-Config and API keys are kept by default.
-
-```bash
-cd AZZATSSINS_LITE_AGENT_v10.0
-./install.sh
-# or: ./update-local.sh
+azzx doctor     # Python, deps, disk, memory, providers — all green?
 azzx --version
 ```
 
-| Path | On upgrade |
-|------|------------|
-| `~/.local/share/azzatssins-lite-agent/` | App files replaced (includes `azzx/` package) |
-| `~/.config/azzatssins-lite-agent/` | **Preserved** |
-| Launcher `azzx` | Updated |
+Configure an AI provider (OpenAI-compatible, Anthropic, Cohere, or local Ollama):
+
+```bash
+azzx ai         # interactive provider setup (keys go to the secure vault)
+```
+
+> No provider yet? Most commands that don't need AI (`exec`, `checkpoint`,
+> `schedule`, `doctor`, …) work offline.
 
 ---
 
-## 5. First run & AI configuration
+## 3. Quick start
 
 ```bash
-azzx
+azzx setup
+# → "Namamu siapa?" — AZZX learns your name, language, timezone.
+#   Stored in ~/.config/azzx/profile.json (chmod 600, never leaves your machine).
+
+azzx chat
+# → interactive companion with slash commands:
+#   /plan <goal>   /auto <goal>   /remember <fact>   /learn   /memory <q>   /quit
+
+azzx auto "cek kesehatan sistem lalu ringkas dalam Bahasa Indonesia"
+# → generates a plan, asks approval, executes via real tools,
+#   checkpoints before risky steps, then distills learnings for your review.
+
+azzx learn list
+# → review what the agent learned; approve what deserves to become memory/skill.
+
+azzx gui
+# → friendly ChatGPT-like web UI at http://127.0.0.1:8766 (chat, streaming, quick actions)
 ```
 
-On first run, configure:
+---
 
-- AI provider
-- API key
-- model
-- endpoint (if needed)
-- fallback providers
+## 4. Command reference
 
-Reopen AI settings anytime:
+Every command below shows its purpose and one example. Run `azzx <command> --help`
+for full flags.
 
-```bash
-azzx ai
-```
+### Companion & chat
 
-Config lives under:
+| Command | What it does | Example |
+|---|---|---|
+| `azzx setup` | First-run setup: your name, language, notes (local only) | `azzx setup` |
+| `azzx chat` | Interactive companion REPL with streaming + slash commands | `azzx chat` |
+| `azzx gui` | Friendly ChatGPT-like web UI (streaming chat, quick actions) | `azzx gui --open` |
+| `azzx gateway telegram` | Run AZZX as a Telegram bot on your phone | `azzx gateway telegram --token $TG --allow-from 123456` |
+
+`azzx chat` slash commands: `/plan`, `/auto`, `/agent`, `/learn`,
+`/remember <fact>`, `/memory <q>`, `/skills`, `/trace`, `/clear`, `/quit`.
+
+### Autonomous agent
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx auto "<goal>"` | **Plan → approve → execute → learn**, fully autonomous | `azzx auto "backup project ke /tmp/bak" -y` |
+| `azzx agent "<task>"` | Multi-agent pipeline (planner → researcher → coder → reviewer → tester → security) | `azzx agent "refactor auth.py"` |
+| `azzx agent --roles` | List the 6 roles and their tool allowlists | `azzx agent --roles` |
+
+`auto` flags: `-y` (skip approval — use carefully), `--max-steps N` (default 25),
+`--workdir PATH`. High-risk steps are checkpointed automatically.
+
+### Planning & learning
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx plan "<goal>"` | Generate an explicit tool-grounded plan (saved to `.azzx/plans/`) | `azzx plan "deploy ke VPS"` |
+| `azzx plan "<goal>" --execute` | Show the plan, then execute it | `azzx plan "bersihkan /tmp" --execute -y` |
+| `azzx learn list` | Show staged learnings (memories + skill drafts) | `azzx learn list` |
+| `azzx learn approve memory 0` | Approve a staged memory into long-term memory | `azzx learn approve memory 0` |
+| `azzx learn approve skill 0` | Install a drafted skill (untrusted+disabled; review first!) | `azzx learn approve skill 0` |
+| `azzx learn discard <kind> <i>` | Discard a staged proposal | `azzx learn discard skill 1` |
+
+The agent also tracks itself with `todo.add` / `todo.list` / `todo.done` /
+`todo.clear` tools during autonomous runs.
+
+### Memory
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx recall search "<q>"` | Hybrid keyword+semantic search over long-term memory | `azzx recall search "preferensi deploy"` |
+| `azzx recall add "<fact>"` | Store a memory manually | `azzx recall add "VPS di 192.0.2.10"` |
+| `azzx recall list` | List memories | `azzx recall list --limit 20` |
+| `azzx recall delete <id>` | Delete a memory | `azzx recall delete 42` |
+| `azzx recall stats` | Memory statistics | `azzx recall stats` |
+| `azzx remember "<note>"` | Append to *project* memory (`.azzx/memory.md`) | `azzx remember "pakai uv, bukan pip"` |
+
+Secrets (API keys, tokens, private keys) are **refused** at the memory gate.
+
+### Sandboxed execution
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx exec run -- <cmd>` | Run a command in a sandbox (cwd jail, timeout, output cap, secret-scrubbed env) | `azzx exec run -- python3 script.py` |
+| `azzx exec run --backend docker -- <cmd>` | Stronger isolation: Docker, `--network none`, 512 MB | `azzx exec run --backend docker -- ./build.sh` |
+| `azzx exec backends` | List available backends (`local`, `docker` if installed) | `azzx exec backends` |
+
+The agent uses the `sandbox.exec` tool for the same purpose. Honest limits:
+`local` cannot block network access — use `docker` when that matters.
+
+### Scheduling
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx schedule add <tool>` | Run a registered tool every N seconds | `azzx schedule add sys.health --every 3600` |
+| `azzx schedule add <tool> --cron "<expr>"` | Cron syntax (no new dependencies) | `azzx schedule add sys.health --cron "*/15 9-17 * * 1-5"` |
+| `azzx schedule list` | List jobs | `azzx schedule list` |
+| `azzx schedule run-due` | Execute due jobs once (call from cron/systemd) | `*/5 * * * * azzx schedule run-due` |
+| `azzx schedule remove <id>` | Remove a job | `azzx schedule remove a1b2c3` |
+
+### Skills & MCP
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx skills list` | List installed skills | `azzx skills list` |
+| `azzx skills install <dir\|url>` | Install from a directory **or git URL** (untrusted+disabled) | `azzx skills install https://github.com/…/my-skill` |
+| `azzx skills trust <id>` | Mark a skill trusted after reviewing its code | `azzx skills trust my-skill` |
+| `azzx skills enable <id>` | Enable a trusted skill (registers `skill.<id>` tool) | `azzx skills enable my-skill` |
+| `azzx skills invoke <id>` | Invoke a skill directly | `azzx skills invoke my-skill --args '{}'` |
+| `azzx skills find "<q>"` | Search skills | `azzx skills find "pdf"` |
+| `azzx mcp list` | List configured MCP servers | `azzx mcp list` |
+| `azzx mcp add <name> <cmd>` | Add an MCP server (stdio) | `azzx mcp add files npx -y @modelcontextprotocol/server-filesystem /tmp` |
+| `azzx mcp tools <name>` | List a server's tools | `azzx mcp tools files` |
+| `azzx mcp call <name> <tool>` | Call an MCP tool | `azzx mcp call files read_file '{"path":"/tmp/a.txt"}'` |
+
+The agent can also call MCP tools itself via the `mcp.call` registry tool
+(permission `mcp.execute`).
+
+### Sessions & checkpoints
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx session start <project> [title]` | Start a session journal | `azzx session start webku "refactor auth"` |
+| `azzx session log <id> <msg>` | Log an event | `azzx session log sess_abc "selesai migrasi"` |
+| `azzx session resume <id>` | Restore a session's context | `azzx session resume sess_abc` |
+| `azzx session search "<q>"` | Search titles, summaries and events | `azzx session search "migrasi"` |
+| `azzx session stale` | Find interrupted sessions | `azzx session stale --hours 48` |
+| `azzx checkpoint create` | Snapshot the working dir (tarball, no git needed) | `azzx checkpoint create --label "sebelum refactor"` |
+| `azzx checkpoint rollback <id>` | Restore a snapshot | `azzx checkpoint rollback 20261010-120000-1234` |
+| `azzx checkpoint list` | List checkpoints | `azzx checkpoint list` |
+| `azzx trace` | Show the recent execution timeline (debugging) | `azzx trace --limit 30` |
+
+### Background queue
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx queue add <tool>` | Enqueue a tool call for background execution | `azzx queue add sys.health --args '{}'` |
+| `azzx queue list` | List queued/running/done/error jobs | `azzx queue list` |
+| `azzx queue cancel <id>` | Cancel a job | `azzx queue cancel abc123` |
+| `azzx queue resume <id>` | Resume an interrupted job | `azzx queue resume abc123` |
+
+### Coding & engineering
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx ask "<q>"` | Ask the AI about your project | `azzx ask "di mana bug login?"` |
+| `azzx fix "<desc>"` | AI-driven code fix | `azzx fix "null pointer di handler"` |
+| `azzx add "<desc>"` | Implement a feature | `azzx add "tambah retry ke client"` |
+| `azzx review` | Static code review | `azzx review --focus security` |
+| `azzx test` | Run tests | `azzx test` |
+| `azzx debug <cmd>` | Run + diagnose a failing command | `azzx debug "python3 main.py"` |
+| `azzx autodebug <cmd>` | Loop: run → fix → run | `azzx autodebug "pytest -x"` |
+| `azzx implement "<desc>"` | Larger implementation task | `azzx implement "tambah caching"` |
+| `azzx create "<desc>"` | Scaffold a new project | `azzx create "REST API dengan FastAPI"` |
+| `azzx architect` | Architecture analysis | `azzx architect` |
+| `azzx factory "<spec>"` | Spec → roadmap → sandbox team → regression → package | `azzx factory "todo app"` |
+| `azzx sandbox "<task>"` | Develop in an isolated copy, validate, then merge | `azzx sandbox "tambah fitur X"` |
+| `azzx develop "<goal>"` | Guided development session | `azzx develop "selesaikan issue #12"` |
+| `azzx team "<goal>"` | Multi-role team run | `azzx team "audit keamanan"` |
+
+### Web browsing (autonomous)
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx webauto "<task>"` | **Goal-driven browsing that solves by itself:** searches, opens pages, follows links until it can answer (read-only) | `azzx webauto "berapa harga kopi robusta hari ini"` |
+| `azzx browse search "<q>"` | Web search (DuckDuckGo) | `azzx browse search "harga kopi"` |
+| `azzx browse fetch <url>` | Fetch a page as readable text (no JS rendering) | `azzx browse fetch https://example.com` |
+| `azzx browse links <url>` | List a page's outbound links | `azzx browse links https://example.com` |
+
+`webauto` flags: `--start-url URL` (skip search), `--max-steps N` (default 12).
+The agent only follows links actually present on the page — hallucinated URLs
+are blocked. Agent tools: `web.search`, `web.fetch`, `web.links` (permission
+`web.read`). Honest limit: text web only, no JavaScript — for JS-heavy sites
+use Playwright separately (deliberately not bundled).
+
+### Connectors
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx connector setup github` | Connect GitHub via personal access token (vault-stored) | `azzx connector setup github` |
+| `azzx connector setup email` | Connect email via IMAP/SMTP (app password) | `azzx connector setup email` |
+| `azzx connector list` | List configured connectors | `azzx connector list` |
+
+Agent tools: `github.repos`, `github.list_issues`, `github.create_issue`,
+`email.inbox`, `email.send` (permissions `connector.github` / `connector.email`).
+Google Drive needs a Google Cloud OAuth2 app — deferred, documented in code.
+
+### System toolkit
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx install <app>` | Universal app installer (200+ apps, distro-aware) | `azzx install ffmpeg` / `azzx install --dry-run ffmpeg` |
+| `azzx toolkit sys` | System info, health, processes, services | `azzx toolkit sys --action health` |
+| `azzx toolkit net` | Network checks | `azzx toolkit net --action connectivity` |
+| `azzx toolkit fs` | Filesystem operations | `azzx toolkit fs --action list --path .` |
+| `azzx toolkit media` | Media utilities | `azzx toolkit media --action info --file a.mp3` |
+| `azzx tools list` | List *every* registered tool | `azzx tools list` |
+| `azzx tools run <tool>` | Run one registered tool directly | `azzx tools run sys.health` |
+| `azzx nl "<text>"` | Natural language → tool call | `azzx nl "cek kesehatan disk"` |
+| `azzx workflow …` | Deterministic multi-step workflows | `azzx workflow list` |
+| `azzx dashboard` | Web dashboard | `azzx dashboard --port 8080` |
+
+### Android device
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx mirror start` | Mirror Android screen via scrcpy | `azzx mirror start --serial ABC123` |
+| `azzx mirror status` | Mirror status | `azzx mirror status` |
+| `azzx mirror stop` | Stop mirroring | `azzx mirror stop` |
+
+### Safety & permissions
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx permissions list` | Show the permission policy table | `azzx permissions list` |
+| `azzx permissions set <cap> <allow\|prompt\|deny>` | Change a capability policy | `azzx permissions set network.http deny` |
+
+Policies: `allow` (no prompt), `prompt` (ask), `deny` (**absolute** — no
+`-y`, queue, workflow, or autonomous run can bypass it).
+
+### Utilities
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx doctor` | Health check (Python, tools, providers, disk, memory) | `azzx doctor` |
+| `azzx ai` | Configure AI providers | `azzx ai` |
+| `azzx config` | Show configuration | `azzx config` |
+| `azzx update` | Self-update | `azzx update` |
+| `azzx --version` | Version | `azzx --version` |
+
+> Legacy shim: `azzx hermes` prints a migration guide (exit 2). There is no
+> separate Hermes mode — everything is one unified agent.
+
+---
+
+## 5. How it works
 
 ```text
-~/.config/azzatssins-lite-agent/
+You (chat / auto / Telegram / CLI)
+        ↓
+Companion layer (persona, profile, long-term memory)
+        ↓
+Planner  →  explicit plan (`.azzx/plans/`)  →  your approval
+        ↓
+Autonomous runner → tool calls ONLY through the registry
+        ↓                    ↓ deny-first permission gate
+Tool Registry  →  sandbox.exec · sys.* · mcp.call · skill.* · todo.* …
+        ↓
+Checkpoint before risky steps · trace everything · distill learnings
 ```
 
-**Never** commit API keys to Git or hard-code them in source.
-
----
-
-## 6. Command structure
-
-```bash
-azzx <command> [arguments] [options]
-azzx --path /path/to/project <command>
-azzx --ai <provider_id> <command>
-azzx --version
-azzx --help
-```
-
-| Option | Meaning |
-|--------|---------|
-| `--path` / `-p` | Workspace directory (default: current dir) |
-| `--ai` | Force a configured provider for this run |
-| `--version` | Print version |
-
-Interactive mode:
-
-```bash
-azzx
-```
-
-Useful interactive entry points (when offered by the UI):
-
-```text
-/apps     Application Center
-/ai       Provider settings
-```
-
-Prefer normal CLI commands in scripts.
+**Autonomy loop:** `plan → approve → execute → checkpoint → learn`.
+Learnings are *staged*, never applied silently — you review with `azzx learn`.
 
 ---
 
-## 7. v1 — AI CLI foundation
+## 6. Configuration
 
-### Features
+- `~/.config/azzx/` — `config.json`, providers, `profile.json`, `mcp.json`, vault
+- `~/.local/share/azzx/` — memory DB, sessions, checkpoints, learnings, queue
+- `.azzx/` (per project) — plans, project memory, local skills
 
-- AI chat from the terminal  
-- First-run API key setup  
-- Provider / model configuration  
-- Persistent config  
-- Run from any directory  
-
-### Commands
-
-#### `azzx` — interactive shell
-
-```bash
-azzx
-```
-
-Opens the home UI: status, workspace, menus for code and system tools.
-
-#### `azzx ask "…"` — ask the AI about the workspace or a topic
-
-```bash
-azzx ask "Explain how this project is structured"
-azzx ask "What does main.py do?"
-```
-
-**How it works:** loads limited project context (respecting max files/chars), sends your question to the configured provider, prints the answer. Does not necessarily modify files.
-
-#### `azzx ai` — configure providers and keys
-
-```bash
-azzx ai
-```
-
-Add provider, paste API key, pick model, set priority / fallback. Keys stored under config (encrypted if `cryptography` is available).
+API keys live in the OS-appropriate secure vault, never in chat or files.
 
 ---
 
-## 8. v2 — AI coding agent
+## 7. FAQ
 
-### Features
+**Will it run on my old laptop?**
+Yes. AZZX needs Python 3.10+ and ~100 MB RAM. Intelligence comes from the AI
+provider over API — your machine just runs the harness. Run `azzx doctor` to verify.
 
-- Read project files with safety limits  
-- Create / edit files  
-- Fix bugs, add features, implement specs  
-- Diff / backup / undo awareness  
-- Multi-provider routing  
+**Does it work offline?**
+Non-AI commands (`exec`, `checkpoint`, `schedule`, `doctor`, …) work offline.
+Provider calls need internet (or a local Ollama).
 
-### Commands
+**Is it safe to let it run autonomously?**
+`deny` is absolute and cannot be bypassed. Plans are shown before execution
+(unless you pass `-y`). High-risk steps are checkpointed; `rollback` restores.
 
-#### `azzx fix "…"` — fix a bug or broken behavior
+**How is this different from Hermes (Nous Research)?**
+Honest answer in [`docs/HERMES_FEATURE_GAP_ID.md`](./docs/HERMES_FEATURE_GAP_ID.md):
+Hermes is the bigger *platform* (60+ tools, 30+ messaging apps, voice, desktop).
+AZZX wins on the Linux/Termux toolkit, universal installer, Android mirroring,
+deterministic workflows — and now matches Hermes on the core *agent* loop:
+plan, sandbox, checkpoints, learning, autonomy.
 
-```bash
-azzx fix "Fix the login error when password is empty"
-azzx fix "Repair crash on file upload"
-```
+**Can AZZX drive a real browser like Playwright?**
+`azzx browse` is a lightweight reader (no JS). A full Playwright bundle would
+cost ~300 MB disk + lots of RAM and break the "runs on a potato" promise, so
+it's deliberately excluded. If you need it, install Playwright yourself and
+drive it through `azzx exec` / `sandbox.exec`.
 
-**How to use:** describe the bug clearly. AZZX proposes patches; in safe modes you confirm. Check `git diff` / `azzx diff` after.
+**Which apps can it connect to?**
+GitHub and email today (`azzx connector setup`). Google Drive needs a Google
+Cloud OAuth2 app — that's manual console work Google requires; not yet built.
 
-#### `azzx add "…"` — add a feature
-
-```bash
-azzx add "Add dark mode toggle"
-azzx add "Add health check endpoint"
-```
-
-#### `azzx implement "…"` — implement a larger description
-
-```bash
-azzx implement "Add JWT authentication with refresh tokens"
-```
-
-#### `azzx create "…"` — scaffold a new project or module
-
-```bash
-azzx create "Create a FastAPI hello-world service"
-azzx create "Python CLI for CSV reports" --name csv-tools
-```
-
-`--name` creates work inside a new child directory when supported.
-
-#### `azzx agent "…"` — general coding agent instruction
-
-```bash
-azzx agent "Analyze the project and fix obvious errors"
-```
-
-#### `azzx edit "…"` — edit existing code toward a goal
-
-```bash
-azzx edit "Refactor settings into a config module"
-```
-
-#### `azzx diff` / `azzx undo`
-
-```bash
-azzx diff          # show recent change summary / backup diff
-azzx undo          # restore last backup (confirm when asked)
-azzx undo --yes    # non-interactive when policy allows
-```
-
-**Tip:** use Git for real history; AZZX backups are a safety net, not a replacement for commits.
+**Where do I report bugs?**
+Open an issue at `https://github.com/aziz-sudrajat/azzx`.
 
 ---
 
-## 9. v3 — Software engineer agent
-
-### Features
-
-- Repository map & symbols  
-- Debug loops  
-- Tests, review, security scan  
-- Dependencies, Git checkpoints  
-- Project memory  
-
-### Commands
-
-#### `azzx map` — repository map
-
-```bash
-azzx map
-```
-
-Indexes structure / symbols to help later AI and navigation commands.
-
-#### `azzx symbol NAME` / `azzx refs NAME`
-
-```bash
-azzx symbol UserService
-azzx refs login
-```
-
-Find definitions or references by name.
-
-#### `azzx impact TARGET` — impact analysis
-
-```bash
-azzx impact src/auth.py
-azzx impact UserModel --depth 2
-```
-
-Shows files/symbols likely affected by a change.
-
-#### `azzx debug` / `azzx autodebug`
-
-```bash
-azzx debug python main.py
-azzx debug "The API crashes when uploading a file"
-azzx autodebug python -m pytest
-```
-
-**debug:** run a command or describe a failure; AI helps diagnose.  
-**autodebug:** repeatedly run/fix within iteration limits.
-
-#### `azzx review` / `azzx review-range`
-
-```bash
-azzx review
-azzx review security
-azzx review-range HEAD~3..HEAD
-```
-
-AI review of the workspace or a Git revision range (correctness, quality, security, maintainability).
-
-#### `azzx test` / `azzx tests`
-
-```bash
-azzx test
-azzx test pytest -q
-azzx tests generate
-azzx tests run
-```
-
-Detect or run project tests; optionally generate focused tests.
-
-#### `azzx security`
-
-```bash
-azzx security
-azzx security --external   # also run installed external scanners if enabled
-```
-
-Static patterns (e.g. risky `shell=True`, secrets patterns) plus optional external tools.
-
-#### `azzx deps`
-
-```bash
-azzx deps
-azzx deps --install      # install requirements.txt after confirmation
-```
-
-#### `azzx remember` / `azzx memory` / `azzx index`
-
-```bash
-azzx remember "We use PostgreSQL in production, SQLite in tests"
-azzx memory
-azzx index
-```
-
-Store project decisions; show memory; refresh index.
-
-#### `azzx architect`
-
-```bash
-azzx architect
-```
-
-Generate or refresh architecture notes from the codebase.
-
-#### `azzx git` / checkpoints
-
-```bash
-azzx git status
-# checkpoint helpers are used automatically before many edits when enabled
-```
-
-#### `azzx issue`
-
-```bash
-azzx issue list
-azzx issue create "Login fails on empty password"
-azzx issue show 1
-azzx issue solve 1
-```
-
-Lightweight issue lifecycle tied to the project.
-
-#### `azzx benchmark` / `azzx profile`
-
-```bash
-azzx benchmark python main.py
-azzx profile python main.py
-```
-
-#### `azzx history` / `azzx scan` / `azzx doctor`
-
-```bash
-azzx history
-azzx scan
-azzx doctor
-azzx doctor --online
-```
-
-Change history, workspace scan, environment health.
-
----
-
-## 10. v4 — Software factory
-
-### Features
-
-- Spec & roadmap  
-- Factory pipeline  
-- CI scaffold  
-- SQLite tools  
-- Build / release helpers  
-
-### Commands
-
-#### `azzx spec`
-
-```bash
-azzx spec init
-azzx spec generate "Task management API for small teams"
-azzx spec show
-```
-
-Product requirements / architecture specification files in the project.
-
-#### `azzx roadmap`
-
-```bash
-azzx roadmap generate "Ship MVP in 4 milestones"
-azzx roadmap list
-```
-
-Persistent engineering milestones.
-
-#### `azzx factory "…"`
-
-```bash
-azzx factory "Create a task management application"
-```
-
-High-level pipeline (conceptual):
-
-```text
-Requirement → Spec → Roadmap → Sandbox team work
-    → Tests / security gates → Regression → Optional package
-```
-
-#### `azzx build` / `azzx release` / `azzx release-prepare`
-
-```bash
-azzx build
-azzx release-prepare 1.0.0
-```
-
-Packaging / gated release candidate helpers (exact artifacts depend on project type).
-
-#### `azzx ci`
-
-```bash
-azzx ci github
-azzx ci gitlab
-azzx ci local
-```
-
-Scaffold CI config.
-
-#### `azzx db`
-
-```bash
-azzx db inspect app.db
-azzx db query app.db "SELECT COUNT(*) FROM users"
-azzx db explain app.db "SELECT * FROM users WHERE active=1"
-```
-
-SQLite inspect / query / explain / migrate-style helpers (write ops respect permissions).
-
----
-
-## 11. v5 — Advanced engineering agent
-
-### Features
-
-- Sandbox-first develop  
-- Permission policies  
-- Multi-agent team  
-- MCP, skills, plugins (command style)  
-- Regression baseline  
-- Local dashboard  
-
-### Commands
-
-#### `azzx sandbox` / `azzx develop`
-
-```bash
-azzx develop "Add CSV export"
-azzx develop "Add CSV export" --direct      # skip sandbox when you intend to
-azzx sandbox ...                            # isolated copy, validate, merge
-```
-
-**Recommended:** default sandbox path — changes applied in a copy, then merge after validation.
-
-#### `azzx team "…"` / `azzx roles`
-
-```bash
-azzx team "Harden the auth module"
-azzx roles
-```
-
-Specialized roles (planner, architect, coder, security, QA, …) with optional per-role providers.
-
-#### `azzx permissions`
-
-```bash
-azzx permissions list
-azzx permissions set shell.run ask
-azzx permissions set package.install allow
-azzx permissions reset
-```
-
-Policies: **allow** / **ask** / **deny** per capability (see [Permissions](#18-permissions--safety)).
-
-#### `azzx regression`
-
-```bash
-azzx regression capture
-azzx regression check
-```
-
-Baseline and compare to catch accidental breakages.
-
-#### `azzx mcp`
-
-```bash
-azzx mcp list
-azzx mcp add NAME COMMAND [ARGS...]
-azzx mcp call NAME TOOL [JSON_ARGS]
-```
-
-Model Context Protocol clients — **only trusted servers**.
-
-#### `azzx skill`
-
-```bash
-azzx skill list
-azzx skill create my-skill
-azzx skill use my-skill
-```
-
-Reusable engineering instructions for the agent.
-
-#### `azzx plugin` (command plugins + v9 manifest plugins)
-
-```bash
-# Legacy command plugins (v5)
-azzx plugin list
-azzx plugin add mycmd 'echo hello'
-azzx plugin run mycmd
-
-# Manifest plugins (v9)
-azzx plugin install examples/sample-plugin --force
-azzx plugin load
-```
-
-#### `azzx dashboard`
-
-```bash
-azzx dashboard
-azzx dashboard --host 127.0.0.1 --port 8765
-```
-
-Local **read-only** HTTP dashboard for project status. Keep bound to localhost.
-
-#### `azzx config` / `azzx mode`
-
-```bash
-azzx config
-azzx mode safe      # or normal / auto — affects autonomy
-```
-
-#### `azzx research` / `azzx docs` / `azzx env` / `azzx remote` / `azzx workspace` / `azzx clone`
-
-```bash
-azzx research "FastAPI dependency injection"
-azzx docs https://docs.python.org/3/library/asyncio.html "How does gather work?"
-azzx env
-azzx env --tools
-azzx clone https://github.com/org/repo.git
-```
-
----
-
-## 12. v6 — Universal Application Installer
-
-### Features
-
-- OS / distro / arch detection  
-- Native package managers  
-- Plan / dry-run / isolated installs  
-- Update, repair, uninstall, history  
-- Application Center  
-
-### Installation flow
-
-```text
-azzx install APP
-  → detect OS / distro / arch / package manager
-  → resolve alias / recipe
-  → prefer native package
-  → show plan / confirm (unless --yes)
-  → install via PM
-  → verify executable
-  → record history
-```
-
-AZZX does **not** run arbitrary AI-invented install scripts.
-
-### Supported managers
-
-| Environment | Manager |
-|-------------|---------|
-| Termux | `pkg` |
-| Debian / Ubuntu / Mint / Kali / Pop!_OS | `apt` |
-| Arch / Manjaro / EndeavourOS | `pacman` |
-| Fedora | `dnf` |
-| RHEL-family | `dnf` / `yum` |
-| openSUSE | `zypper` |
-| Alpine | `apk` |
-| Void | `xbps` |
-| Gentoo | `emerge` |
-
-### Commands
-
-#### `azzx install APP`
-
-```bash
-azzx install ffmpeg
-azzx install git
-azzx install python
-azzx install nodejs
-azzx install metasploit
-```
-
-#### Plan & dry-run (recommended first)
-
-```bash
-azzx install metasploit --plan
-azzx install metasploit --dry-run
-```
-
-No system changes on `--plan` / `--dry-run`.
-
-#### Other install flags
-
-```bash
-azzx install httpie --isolated   # AZZX-managed venv for supported PyPI apps
-azzx install APP --yes           # non-interactive (still respects deny policy)
-azzx install APP --force
-```
-
-#### Lifecycle
-
-```bash
-azzx installed              # history tracked by AZZX
-azzx update ffmpeg
-azzx update --all
-azzx repair ffmpeg
-azzx uninstall ffmpeg       # safe for tracked native / isolated installs
-```
-
-#### Discovery
-
-```bash
-azzx app search video
-azzx app info ffmpeg
-azzx app recipes
-azzx app system             # detected OS / manager summary
-```
-
-#### Application Center (interactive)
-
-```bash
-azzx
-# then: /apps
-```
-
-Menus for install, search, installed, repair, update, uninstall, recipes.
-
-### Metasploit note
-
-Native package first; official Rapid7 script only on **trusted Linux** environments — **not** auto-forced on Termux.
-
----
-
-## 13. v7 — Universal Toolkit
-
-Deterministic tools (no AI required). Listed in the central registry.
-
-### `azzx tools`
-
-```bash
-azzx tools              # same as list
-azzx tools list         # table of all registered tools
-azzx tools run sys.health --args '{}'
-azzx tools run fs.largest --args '{"path":".","limit":10}'
-```
-
-### `azzx toolkit` — shortcuts
-
-| Command | What it does |
-|---------|----------------|
-| `azzx toolkit health` | Disk, load, basic health |
-| `azzx toolkit info` | OS / CPU / memory summary |
-| `azzx toolkit processes` | Process list |
-| `azzx toolkit git-status` | `git status` porcelain summary |
-| `azzx toolkit connectivity` | TCP check (default 1.1.1.1:443) |
-| `azzx toolkit website --url URL` | HTTP(S) status |
-| `azzx toolkit search --path . --pattern '*.py'` | Find files |
-| `azzx toolkit largest --path . --limit 15` | Largest files |
-| `azzx toolkit duplicates --path .` | Duplicate files by hash |
-| `azzx toolkit hash --path FILE --algorithm sha256` | Checksum |
-
-Examples:
-
-```bash
-azzx toolkit health
-azzx toolkit largest --path . --limit 20
-azzx toolkit hash --path README.md --algorithm sha256
-azzx toolkit website --url https://example.com
-```
-
-### Archives & JSON (via tools registry)
-
-```bash
-azzx tools run archive.create --args '{"src":".","dest":"backup.tar.gz","fmt":"tar.gz"}'
-azzx tools run archive.extract --args '{"archive":"backup.tar.gz","dest":"./out"}'
-azzx tools run json.validate --args '{"path":"config.json"}'
-```
-
-Extract **blocks** `../` path traversal.
-
-### Media (FFmpeg)
-
-```bash
-azzx tools run media.probe --args '{"path":"video.mp4"}'
-azzx tools run media.convert --args '{"src":"in.mov","dest":"out.mp4","fmt":"mp4"}'
-```
-
-Formats whitelisted: `mp4`, `webm`, `mp3`, `wav`, `gif`, `mkv`. Requires `ffmpeg` installed (`azzx install ffmpeg`).
-
-### `azzx nl` — natural language → safe tool only
-
-```bash
-azzx nl "show system health"
-azzx nl "git status"
-azzx nl "largest files"
-azzx nl "start screen mirror"
-azzx nl "check https://example.com"
-```
-
-If there is **no safe mapping**, AZZX refuses (e.g. `rm -rf /`) instead of running shell.
-
----
-
-## 14. v8 — Automation & device (mirror)
-
-### Workflows (registered tools only)
-
-```bash
-# Create
-azzx workflow create daily --steps \
-  '[{"tool":"sys.health","args":{}},{"tool":"git.status","args":{"path":"."}}]'
-
-azzx workflow list
-azzx workflow show daily
-azzx workflow run daily
-azzx workflow run daily -y    # non-interactive if policy allows / -y force_yes path
-azzx workflow delete daily
-```
-
-**Rule:** each step `tool` must exist in the registry. Unknown tools → error. No arbitrary shell steps.
-
-### ADB & Termux detection
-
-```bash
-azzx mirror detect          # scrcpy + adb + Termux API presence
-azzx mirror devices         # adb devices (needs device.adb permission)
-```
-
-No free-form `adb shell` from the agent layer.
-
-### Android screen mirror (scrcpy)
-
-Realistic **desktop mirroring** — not a full on-device Samsung DeX OS mode.
-
-**Needs on the computer:** `adb`, `scrcpy`, phone with USB/wireless debugging.
-
-```bash
-azzx install scrcpy --plan
-azzx install scrcpy
-
-azzx mirror detect
-azzx mirror devices
-azzx mirror start --dry-run
-azzx mirror start --max-size 1280
-azzx mirror start --serial DEVICE_ID --fullscreen
-azzx mirror status
-azzx mirror stop
-```
-
-| Option | Meaning |
-|--------|---------|
-| `--serial` | Device serial |
-| `--max-size` | Max dimension (64–4096) |
-| `--bit-rate` | Bitrate range limited |
-| `--fullscreen` | Fullscreen window |
-| `--dry-run` | Print planned argv only |
-
----
-
-## 15. v9 — Plugins & extensibility
-
-### Manifest plugin layout
-
-```text
-my-plugin/
-  manifest.json
-  plugin.py
-```
-
-`manifest.json` example:
-
-```json
-{
-  "id": "sample-echo",
-  "name": "Sample Echo Plugin",
-  "version": "1.0.0",
-  "description": "Example plugin",
-  "tools": ["sample.echo"],
-  "permissions": [],
-  "entrypoint": "plugin.py",
-  "enabled": true
-}
-```
-
-Banned manifest fields include `shell`, `install_script`, `command` (no arbitrary install hooks).
-
-### Commands
-
-```bash
-azzx plugin install examples/sample-plugin --force
-azzx plugin list
-azzx plugin load
-```
-
-Plugins register tools on the shared registry; **execution still uses permission checks**.
-
----
-
-## 16. v10 — Universal Agent Layer
-
-### Architecture
-
-```text
-                    AZZX v10
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-     AI ENGINE                 TOOL ENGINE
-          │                         │
-   Providers, roles,         Registry: tools /
-   memory, factory           workflow / device /
-                             plugins
-```
-
-- **AI** plans and calls structured tools when using NL shortcuts / agent flows.  
-- **Tools** perform side effects with validation + permissions.  
-- Coding + installer features from v1–v6 remain in the main CLI.
-
-### Modular package
-
-```text
-azzx/
-  core.py       # registry, permissions, config, runtime detection
-  agent/        # native agent layer (one unified agent)
-    providers.py    # AI provider adapters, error taxonomy, retries, cancellation
-    multi_agent.py  # planner/researcher/coder/reviewer/tester/security roles
-    memory.py       # SQLite persistent memory, hybrid keyword+semantic search
-    session.py      # session journal: end/resume/stale detection
-    tasks.py        # background task queue (cancel/interrupt/resume)
-    skills.py       # validated, trust-gated native skill registry
-    scheduler.py    # persistent interval scheduler for registered tools
-    reasoning.py tracer.py streaming.py vision.py message_bus.py
-  tools/        # v7 toolkit
-  workflow/     # v8 workflows
-  device/       # adb, mirror, termux
-  plugins/      # v9 loader
-  cli_v10.py    # CLI handlers
-```
-
----
-
-## 17. AI providers
-
-Configure with `azzx ai`. Adapters include OpenAI-compatible endpoints, Anthropic, Cohere, and templates such as Gemini, Groq, Qwen (depending on release templates).
-
-The native provider layer (`azzx/agent/providers.py`) classifies failures into typed errors — authentication, rate limit, timeout, malformed response, provider outage, misconfiguration — with actionable hints, retries retryable errors with bounded exponential backoff (never infinite), and supports cooperative cancellation. API keys live in the local vault and are never written to logs or traces.
-
-Example strategy:
-
-```text
-Primary: Groq → fallback Gemini → fallback OpenAI
-```
-
-Rate limits (429) and quotas still apply; enable fallback in config.
-
----
-
-## 18. Permissions & safety
-
-```bash
-azzx permissions list
-azzx permissions set device.mirror ask
-azzx permissions set shell.run deny
-```
-
-| Capability | Typical default |
-|------------|-----------------|
-| `filesystem.read` / `filesystem.write` | allow |
-| `shell.run` | ask |
-| `package.install` | ask |
-| `git.commit` | ask |
-| `git.push` | deny |
-| `network.http` | allow |
-| `device.adb` / `device.mirror` | ask |
-| `workflow.run` / `plugin.install` | ask |
-| `process.inspect` | allow |
-| `archive.write` | ask |
-| `release.publish` | deny |
-
-### Safety rules of thumb
-
-1. Prefer `azzx install APP --plan` before new packages.  
-2. Prefer sandbox/`develop` for large code changes.  
-3. Use Git commits, not only AZZX undo.  
-4. Never commit secrets.  
-5. Do not `sudo azzx` for normal work.
-
----
-
-## 19. Recommended workflows
-
-### Everyday coding
-
-```bash
-cd ~/project
-azzx map
-azzx review
-azzx test
-azzx fix "Fix the broken login flow"
-git diff
-azzx test
-```
-
-### Large feature
-
-```bash
-azzx factory "Add CSV export and reporting"
-# or
-azzx develop "Add CSV export and reporting"
-```
-
-### Install software
-
-```bash
-azzx app search ffmpeg
-azzx install ffmpeg --plan
-azzx install ffmpeg
-azzx installed
-```
-
-### System check + git
-
-```bash
-azzx toolkit health
-azzx nl "git status"
-```
-
-### Phone mirror on desktop
-
-```bash
-azzx mirror detect
-azzx mirror start --max-size 1280
-```
-
-### Scheduled-style automation (manual/cron)
-
-```bash
-azzx workflow run daily -y
-```
-
----
-
-## 20. Troubleshooting
-
-### `azzx: command not found`
-
-```bash
-which azzx
-echo "$PATH"
-./install.sh
-```
-
-### `ModuleNotFoundError: No module named 'azzx'`
-
-Installer missed the `azzx/` package:
-
-```bash
-cd ~/AZZATSSINS_LITE_AGENT_v10.0   # full extract
-cp -a azzx ~/.local/share/azzatssins-lite-agent/
-# or reinstall:
-./install.sh
-```
-
-### AI 401 / missing key
-
-```bash
-azzx ai
-```
-
-### AI 429
-
-Rate limit — wait or switch fallback provider in `azzx ai`.
-
-### Package install needs admin
-
-Use `azzx install APP` (not `sudo azzx`); grant sudo only for the package manager step when prompted.
-
-### Mirror fails
-
-Install `scrcpy` + `adb`, enable USB debugging, check `azzx mirror devices`.
-
-### GitHub push: password not supported / 403
-
-Use a **Personal Access Token** with `repo` scope, or SSH keys — GitHub rejects account passwords for `git push`.
-
----
-
-## 21. Quick command reference
-
-### Core
-
-```bash
-azzx
-azzx --version
-azzx ai
-azzx ask "..."
-azzx config
-azzx mode safe
-azzx permissions list
-```
-
-### Coding
-
-```bash
-azzx fix "..."
-azzx add "..."
-azzx implement "..."
-azzx create "..."
-azzx agent "..."
-azzx edit "..."
-azzx develop "..."
-azzx diff
-azzx undo
-```
-
-### Engineering
-
-```bash
-azzx map
-azzx review
-azzx test
-azzx debug ...
-azzx security
-azzx architect
-azzx impact PATH
-azzx symbol NAME
-azzx deps
-azzx remember "..."
-azzx team "..."
-azzx sandbox ...
-azzx factory "..."
-azzx spec ...
-azzx roadmap ...
-azzx regression capture|check
-azzx mcp ...
-azzx skill ...
-azzx dashboard
-```
-
-### Applications (v6)
-
-```bash
-azzx install APP [--plan|--dry-run|--isolated]
-azzx update APP | --all
-azzx repair APP
-azzx uninstall APP
-azzx installed
-azzx app search|info|recipes|system
-```
-
-### Toolkit (v7)
-
-```bash
-azzx tools list
-azzx tools run TOOL --args '{...}'
-azzx toolkit health|largest|duplicates|hash|website|...
-azzx nl "show system health"
-```
-
-### Workflow & device (v8)
-
-```bash
-azzx workflow create|list|show|run|delete ...
-azzx mirror detect|devices|start|stop|status
-```
-
-### Plugins (v9)
-
-```bash
-azzx plugin install DIR [--force]
-azzx plugin list
-azzx plugin load
-```
-
-### Agent (v10.4 — one unified agent)
-
-```bash
-azzx agent "harden the auth module" [--agents planner,reviewer,tester] [--parallel]
-azzx agent --roles
-azzx recall search "deployment notes" [--mode hybrid|keyword|semantic]
-azzx recall add "uses blue-green deploys" --tags deploy
-azzx queue submit sys.health --args '{}' -y
-azzx queue list|status|result|cancel|resume ...
-azzx schedule list|add|remove|run-due
-azzx trace [--limit 20] [--kind tool]
-azzx session start|log|end|resume|list|stale ...
-azzx skills list|find|install|trust|enable|invoke ...
-```
-
----
-
-## 22. Project layout
-
-```text
-AZZATSSINS_LITE_AGENT_v10.0/
-├── azzx_cli.py           # Main CLI (v1–v6 surfaces + wiring)
-├── azzx/                 # v7–v10 modules (required at install)
-│   ├── core.py
-│   ├── agent/
-│   ├── tools/
-│   ├── workflow/
-│   ├── device/
-│   ├── plugins/
-│   └── cli_v10.py
-├── tests/
-├── examples/
-│   ├── sample-plugin/
-│   └── workflow-health.json
-├── install.sh
-├── uninstall.sh
-├── update-local.sh
-├── requirements.txt
-├── VERSION
-├── CHANGELOG.md
-└── README.md
-```
-
-Dependencies: `rich`, `httpx` (optional `cryptography`).
-
----
-
-## 23. Limitations
-
-- Screen mirror is **scrcpy on a host**, not a full Samsung DeX environment on the phone.  
-- Install success depends on distro repos and architecture; AZZX stops if no trusted method exists.  
-- Workflows cannot run arbitrary shell by design.  
-- Always verify with `azzx --help` and `azzx <cmd> --help` on your installed build.
-
----
-
-## 24. License / contributing
-
-Add a `LICENSE` file before publishing (e.g. MIT).  
-
-Contributions that fit the design: new **deterministic** registry tools, safer recipes, tests, docs.  
-
-Avoid: free-form shell from AI/workflows, unsigned remote plugin install, silent privilege escalation.
-
----
-
-## Credits
-
-- Termux & major Linux distros  
-- [scrcpy](https://github.com/Genymobile/scrcpy) for mirroring when installed  
-- [Rich](https://github.com/Textualize/rich) · [httpx](https://github.com/encode/httpx)
-
-```bash
-azzx --version
-# AZZATSSINS LITE AGENT 10.4.0
-```
-
-
-## v10.3 — Reliability and scheduled tools
-
-The v10.3 release hardened background task persistence and added an opt-in interval scheduler. Jobs can call **registered AZZX tools only**; they cannot contain shell commands, Python, or arbitrary scripts. The scheduler is intentionally a one-shot runner, so use cron/systemd or invoke it manually.
-
-## v10.4 — Unified native agent (no separate modes)
-
-v10.4 removes the separate `azzx hermes` mode. All advanced agent capabilities now live **natively inside AZZX's normal architecture and CLI** — one unified agent:
-
-| Before (v10.2–v10.3) | v10.4 |
-|---|---|
-| `azzx hermes think …` | `azzx agent "…"` (`--agents`, `--parallel`, `--fail-fast`) |
-| `azzx hermes memory …` | `azzx recall search|add|list|delete|rebuild|stats` |
-| `azzx hermes trace` | `azzx trace [--limit N] [--kind K]` |
-| `azzx hermes queue …` | `azzx queue submit|list|status|result|cancel|resume` |
-| `azzx hermes schedule …` | `azzx schedule list|add|remove|run-due` |
-| `azzx hermes stream …` | `azzx ask --stream "…"` |
-
-Running `azzx hermes` now prints this migration table.
-
-### Multi-agent roles (real provider calls)
-
-```bash
-azzx agent --roles
-azzx agent "Review the auth module for security issues" --agents planner,reviewer,security
-```
-
-Six roles — planner, researcher, coder, reviewer, tester, security — each with a role prompt, a tool allowlist, and a structured JSON result passed to the next stage. Every delegation calls the **configured AI provider** (no canned responses); failures are reported visibly. Sequential by default; `--parallel` is only allowed for read-only roles.
-
-### Persistent memory
-
-```bash
-azzx recall add "production uses blue-green deploys" --tags deploy --project web
-azzx recall search "deployment strategy" --mode hybrid
-azzx recall list --project web
-azzx recall delete 42
-azzx recall rebuild   # re-embed the semantic index from scratch
-azzx recall stats
-```
-
-SQLite-backed, Termux-light: keyword + TF-IDF semantic hybrid search, project scoping, shared/private boundaries (an agent always sees its own memories; others' only when shared), exact-duplicate suppression, and refusal to store anything that looks like a secret.
-
-### Background tasks
-
-```bash
-azzx queue submit sys.health --args '{}' -y   # -y pre-approves permission prompts
-azzx queue list --status running
-azzx queue result TASK_ID --wait 30
-azzx queue cancel TASK_ID
-azzx queue resume TASK_ID   # deliberate requeue of interrupted/error/cancelled tasks
-```
-
-A task whose owner died becomes `interrupted` — it is **not** silently re-run (side effects may already have happened). Background runs never prompt: tools whose permissions aren't policy-`allow` need `-y` at submit time. `deny` is absolute and cannot be bypassed by `-y`, workflows, or the queue.
-
-### Sessions
-
-```bash
-azzx session start web "deploy work"     # prints SESSION_ID
-azzx session log SESSION_ID --agent planner --stage plan "decided blue-green"
-azzx session end SESSION_ID --status done --summary "shipped"
-azzx session resume SESSION_ID           # restores summary + events + project context
-azzx session stale --hours 24            # find interrupted sessions
-```
-
-### Skills (native, trust-gated)
-
-```bash
-azzx skills find "uppercase text"
-azzx skills install ./my-skill            # installed untrusted + disabled
-azzx skills trust my-skill && azzx skills enable my-skill
-azzx skills invoke my-skill --args '{"text":"hi"}'
-```
-
-A skill ships a validated `skill.json` (id, version, input schema, handler, permissions) plus a `handler.py`. Arguments are validated against the schema and permissions enforced at execution; third-party code never runs until explicitly trusted. Enabled skills are also callable as `skill.<id>` tools (and from queue/workflows) through the same permission checks. See `examples/sample-skill/`.
-
-### Scheduler
-
-```bash
-# List schedules
-azzx schedule list
-
-# Run jobs that are due (one pass)
-azzx schedule run-due
-
-# Example: run system info every hour (minimum interval: 60 seconds)
-azzx schedule add sys.info --every 3600 --name "hourly system info" --args '{}'
-
-# Remove a schedule using the ID printed by add/list
-azzx schedule remove JOB_ID
-```
-
-For a cron runner, edit your crontab with `crontab -e` and add a line such as `* * * * * /path/to/azzx schedule run-due`. Use the absolute path to the installed `azzx` command.
-
-### Reliability fixes
-
-- Queue submission persists the initial task before making it visible to a worker.
-- Terminal task state and its persisted snapshot are synchronized, avoiding a result/temporary-directory cleanup race.
-- Queue snapshots use unique temporary files and atomic replacement; stale local snapshots are prevented from regressing a detached worker's state.
-- Invalid/stale PID fields are handled safely during task recovery.
-- Added regression tests for fast concurrent tasks and scheduler lifecycle.
-
-### Current limitations
-
-- `schedule run-due` is not a resident daemon. Cron/systemd must invoke it periodically.
-- Scheduler persistence is designed for one host/user profile, not a distributed multi-host scheduler.
-- The memory search embedder is lightweight TF-IDF, not a neural embedding model.
-- Real provider credentials and cross-distro installation are not exercised by offline CI.
+*AZZX v10.6 — "Connected". MIT License.*

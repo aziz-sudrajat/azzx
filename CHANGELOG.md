@@ -1,5 +1,89 @@
 # Changelog
 
+## v10.6.0 — "Connected"
+
+### GUI
+- `azzx gui` — friendly ChatGPT/Muse-like web chat UI (single HTML file, no
+  build step, no CDN — works offline on low-end machines). Sidebar with quick
+  actions, streaming responses via SSE (`/api/chat/stream`), autonomous runs
+  via `/api/auto`. Stdlib `http.server` only, localhost by default.
+
+### Web reader + autonomous browsing (browser-lite)
+- `azzx browse fetch|links <url>`, `azzx browse search "<q>"`, and `web.fetch` /
+  `web.links` / `web.search` agent tools — httpx + stdlib HTML parsing, SSRF
+  guard refuses non-public hosts.
+- `azzx webauto "<task>"` — goal-driven browsing loop that solves by itself:
+  searches, opens pages, follows links (only URLs actually on the page;
+  hallucinated URLs are blocked), answers when it finds what it needs.
+  Read-only; `--start-url`, `--max-steps`.
+- Honest limit: no JavaScript rendering (Playwright would cost ~300 MB + RAM
+  and break the lightweight promise).
+
+### Connectors
+- `azzx connector setup|list|remove` + framework in `azzx/agent/connectors.py`
+  (config in `connectors.json`, secrets in the vault).
+- GitHub via personal access token: `github.repos`, `github.list_issues`,
+  `github.create_issue` tools (permission `connector.github`).
+- Email via stdlib IMAP/SMTP: `email.inbox`, `email.send` tools
+  (permission `connector.email`). No new dependencies.
+- Google Drive deliberately deferred: needs a Google Cloud OAuth2 app.
+
+## v10.5.0 — "Autonomous Companion"
+
+Closes the agent-capability gap with Hermes (Nous Research) — see
+`docs/HERMES_FEATURE_GAP_ID.md` for the honest feature-by-feature accounting
+(what was matched, what was deliberately deferred, and why).
+
+### Autonomous agent core
+- `azzx auto "<goal>"` — plan → approve → execute → learn. Steps run through
+  the permission-enforcing registry (deny-first stays absolute); high-risk
+  steps are checkpointed automatically; one replan on failure; learnings are
+  staged for review, never applied silently.
+- `azzx plan "<goal>" [--execute]` — explicit tool-grounded plans saved to
+  `.azzx/plans/`; `--execute` runs them through the autonomy runner.
+- `todo.add/list/done/clear` tools so the agent tracks its own checklist.
+
+### Learning loop
+- `azzx/agent/learning.py` + `azzx learn list|approve|discard` — post-task
+  distillation into staged memory/skill proposals. Secrets refused at the gate;
+  skill drafts install untrusted + disabled (trust-gate preserved).
+
+### Sandbox
+- `azzx exec run -- <cmd>` (+ `--backend local|docker`, `--timeout`,
+  `--allow-network`) and the `sandbox.exec` agent tool — cwd jail, timeout,
+  output cap, secret-scrubbed env, RLIMIT guards on POSIX; Docker backend with
+  `--network none` and 512 MB for real isolation.
+
+### Checkpoints
+- `azzx checkpoint create|list|rollback|prune` — tarball snapshots with
+  manifests; no git dependency (works on Termux); archives are
+  path-traversal-checked on restore.
+
+### Companion
+- `azzx setup` — first-run profile (name, language, timezone, notes), local only.
+- `azzx chat` — interactive REPL with companion persona, streaming, memory
+  context, and slash commands (`/plan /auto /agent /learn /remember /memory
+  /skills /trace /clear /quit`).
+- `azzx gateway telegram` — minimal Telegram bot gateway (httpx long-polling,
+  no new deps) with `--allow-from` chat allowlist and `/auto /plan /remember`.
+
+### Scheduling, skills, sessions, MCP
+- `azzx schedule add --cron "*/5 * * * *"` — cron expressions via a
+  dependency-free parser (`azzx/agent/cronutil.py`).
+- `azzx skills install <git-url>` — shallow-clone + manifest validation.
+- `azzx session search "<q>"` — LIKE-based search over the session journal.
+- `mcp.call` tool exposes AZZX's existing MCP client to the agent
+  (permission `mcp.execute`); the pre-existing `azzx mcp` CLI is unchanged.
+- `azzx doctor` gains disk + memory rows (existing command, extended).
+
+### Docs
+- README.md + README_ID.md rewritten: task-oriented, every command with an
+  example. `docs/HERMES_FEATURE_GAP_ID.md` documents the Hermes comparison.
+
+### Lightweight promise
+- Zero new required dependencies (still `httpx` + `rich` only); lazy imports
+  throughout; new modules degrade gracefully without `rich`.
+
 ## v10.4.0 — Unified native agent (no separate modes)
 
 **Design correction:** the separate `azzx hermes` mode/product is removed.

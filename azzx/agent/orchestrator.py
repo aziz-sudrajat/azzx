@@ -31,6 +31,19 @@ def register_all() -> None:
     register_all_device_tools()
     register_plugin_tools()
     try:
+        from azzx.agent.sandbox import register_sandbox_tools
+        from azzx.agent.planning import register_planning_tools
+        from azzx.agent.mcp import register_mcp_tools
+        from azzx.agent.webreader import register_webreader_tools
+        from azzx.agent.connectors import register_connector_tools
+        register_sandbox_tools()
+        register_planning_tools()
+        register_mcp_tools()
+        register_webreader_tools()
+        register_connector_tools()
+    except Exception:  # noqa: BLE001 — agent-native tools must not break boot
+        pass
+    try:
         register_skill_tools()
     except Exception:  # noqa: BLE001 — skills must not break boot
         pass
