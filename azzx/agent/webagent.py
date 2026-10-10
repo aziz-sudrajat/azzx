@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any, Callable
 
 from azzx.core import AzzxError
@@ -83,35 +84,49 @@ class WebAgent:
 
     def run(self, task: str, start_url: str | None = None) -> dict[str, Any]:
         from azzx.agent.webreader import search as web_search
+        from azzx.agent import auditor
 
         task = (task or "").strip()
         if not task:
             raise AzzxError("task required")
+        run_id = auditor.start_run(f"webauto: {task}")
+        try:
+            return self._run_inner(task, start_url, run_id)
+        finally:
+            auditor.end_run()
+
+    def _run_inner(self, task: str, start_url: str | None, run_id: str) -> dict[str, Any]:
+        from azzx.agent.webreader import search as web_search
+        from azzx.agent import auditor
+
         if start_url:
             current = start_url
         else:
             results = web_search(task)
             if not results:
-                return {"status": "no_results", "task": task, "trail": []}
+                return {"status": "no_results", "task": task, "run_id": run_id, "trail": []}
             current = results[0]["href"]
 
         steps = 0
         while steps < self.max_steps:
             steps += 1
+            t0 = time.monotonic()
             page = self._fetch(current)
+            auditor.log_custom("web.fetch", ok=True, detail=page.get("final_url", current),
+                               duration_ms=int((time.monotonic() - t0) * 1000))
             self.trail.append(page.get("final_url", current))
             decision = self._decide(task, page, self.trail)
             if decision.get("action") == "answer":
-                return {"status": "answered", "task": task,
+                return {"status": "answered", "task": task, "run_id": run_id,
                         "answer": str(decision.get("answer", ""))[:4000],
                         "steps": steps, "trail": self.trail}
             nxt = str(decision.get("url", "")).strip()
             allowed = {l["href"] for l in page.get("links", [])}
             if nxt not in allowed:
-                return {"status": "blocked", "task": task,
+                return {"status": "blocked", "task": task, "run_id": run_id,
                         "reason": "agent tried to visit a URL not on the page; stopped",
                         "steps": steps, "trail": self.trail}
             current = nxt
-        return {"status": "max_steps", "task": task,
+        return {"status": "max_steps", "task": task, "run_id": run_id,
                 "reason": f"gave up after {self.max_steps} pages",
                 "steps": steps, "trail": self.trail}

@@ -1237,3 +1237,89 @@ def cmd_browse_search(args: Any) -> int:
     _print_json({"results": search(getattr(args, "query", ""),
                                    int(getattr(args, "limit", 8) or 8))})
     return 0
+
+
+@_guard
+def cmd_audit(args: Any) -> int:
+    """azzx audit list|stats|report — did the agent do it right?"""
+    from azzx.agent import auditor as A
+    action = getattr(args, "audit_action", "stats")
+    if action == "list":
+        limit = int(getattr(args, "limit", 30) or 30)
+        run_id = getattr(args, "run", "") or ""
+        entries = A.recent_calls(limit=limit, run_id=run_id)
+        rows = [{"ts": e.get("ts"), "run": (e.get("run_id") or "")[:12],
+                 "tool": e.get("tool"),
+                 "ok": e.get("ok"),
+                 "ms": e.get("duration_ms"),
+                 "err": (e.get("error_kind") or "") if not e.get("ok") else ""}
+                for e in entries]
+        _print_json({"entries": rows})
+        return 0
+    if action == "stats":
+        _print_json(A.stats())
+        return 0
+    if action == "report":
+        run_id = getattr(args, "run", "") or ""
+        if not run_id:
+            raise AzzxError("audit report needs --run <id> (see `azzx audit list`)")
+        rep = A.report(run_id)
+        if getattr(args, "judge", False):
+            try:
+                rep["llm_judge"] = A.judge(run_id)
+            except Exception as exc:
+                rep["llm_judge_error"] = str(exc)[:200]
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            c = Console()
+            color = {"pass": "green", "needs_work": "yellow", "fail": "red"}.get(
+                rep["rule_verdict"], "white")
+            body = (f"Skor aturan: [bold]{rep['rule_score']}/100[/] "
+                    f"([{color}]{rep['rule_verdict']}[/])\n"
+                    f"Calls: {rep['calls']} — ok {rep['ok']}, gagal {rep['failed']}\n")
+            if rep["findings"]:
+                body += "\nTemuan:\n" + "\n".join(f"• {f}" for f in rep["findings"])
+            else:
+                body += "\nTidak ada temuan — bersih."
+            if rep.get("llm_judge"):
+                j = rep["llm_judge"]
+                body += (f"\n\n[bold]Penilaian AI:[/] {j.get('score')}/100 "
+                         f"({j.get('verdict')})\n"
+                         + "\n".join(f"• {i}" for i in (j.get("issues") or [])[:5]))
+            c.print(Panel(body, title=f"Audit {run_id[:16]}", border_style=color))
+            if getattr(args, "verbose", False):
+                _print_json(rep)
+        except Exception:
+            _print_json(rep)
+        return 0 if rep["rule_verdict"] == "pass" else 2
+    raise AzzxError("audit action not recognized")
+
+
+@_guard
+def cmd_compress(args: Any) -> int:
+    """azzx compress <file> — shrink a big file before it enters AI context."""
+    from azzx.agent.compressor import compress_file
+    res = compress_file(
+        getattr(args, "file", ""),
+        budget_chars=int(getattr(args, "budget", 8000) or 8000),
+        strategy=getattr(args, "strategy", "auto") or "auto",
+        query=getattr(args, "query", "") or "",
+    )
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        c = Console()
+        c.print(Panel(
+            f"Strategi: [cyan]{res['strategy']}[/] — "
+            f"{res['original_chars']:,} → {res['compressed_chars']:,} chars "
+            f"(~{res['original_tokens_est']:,} → ~{res['compressed_tokens_est']:,} tokens, "
+            f"rasio {res['ratio']*100:.0f}%)",
+            title=f"Compressed {res['file']}", border_style="cyan"))
+        if not getattr(args, "quiet", False):
+            print(res["text"][:20000])
+    except Exception:
+        _print_json({k: v for k, v in res.items() if k != "text"})
+        if not getattr(args, "quiet", False):
+            print(res["text"][:20000])
+    return 0

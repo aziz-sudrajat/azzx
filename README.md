@@ -1,17 +1,17 @@
-# AZZX v10.6 — Your Personal AI Agent
+# AZZX v10.6.2 — Your Personal AI Agent
 
 **One unified AI agent for your terminal.** Chat with it like a friend, let it plan
 and execute tasks autonomously, and run it on anything from a flagship PC to a
 low-end "kentang" laptop or an Android phone with Termux.
 
 ```bash
-pip install ./azzx              # or: bash install.sh
+bash install.sh                 # installs to ~/.local/share, adds the `azzx` command
 azzx setup                      # tell AZZX your name (stored locally, privately)
 azzx chat                       # talk to your companion
 azzx auto "organize my downloads folder"   # autonomous: plan → approve → execute → learn
 ```
 
-[![Version](https://img.shields.io/badge/version-10.5.0-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.6.2-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -71,12 +71,14 @@ your phone via Telegram.
 **Requirements:** Python 3.10+, ~50 MB disk, ~100 MB RAM free. That's it.
 
 ```bash
-# Option A — pip (recommended)
-pip install ./azzx
-# Option B — installer script
+# Recommended — installer script (venv + deps + `azzx` launcher on PATH)
 bash install.sh
-# Option C — Termux (Android)
-pkg install python git && pip install ./azzx
+# Termux (Android)
+pkg install python git && bash install.sh
+# Manual (tanpa installer): butuh Python 3.10+
+python3 -m venv .venv && . .venv/bin/activate
+pip install httpx rich
+python3 azzx_cli.py --version
 ```
 
 Check the installation:
@@ -175,6 +177,20 @@ The agent also tracks itself with `todo.add` / `todo.list` / `todo.done` /
 | `azzx remember "<note>"` | Append to *project* memory (`.azzx/memory.md`) | `azzx remember "pakai uv, bukan pip"` |
 
 Secrets (API keys, tokens, private keys) are **refused** at the memory gate.
+
+### Audit & compress
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx audit stats` | Success rates, denials, worst tools across all runs | `azzx audit stats` |
+| `azzx audit list` | Recent audited tool calls (`--run <id>` to filter) | `azzx audit list --limit 20` |
+| `azzx audit report --run <id>` | Rule-based correctness report (score 0-100 + findings) | `azzx audit report --run run-abc123` |
+| `azzx audit report --run <id> --judge` | Ask the AI provider to grade the run | `azzx audit report --run run-abc123 --judge` |
+| `azzx compress <file>` | Shrink a big file before it enters AI context | `azzx compress big.py --budget 8000` |
+
+Compressor strategies: `signatures` (Python AST — 70-90% savings), `extractive`
+(query-focused), `head_tail`, `summarize` (LLM). `azzx ask` uses it
+automatically when files exceed the context budget.
 
 ### Sandboxed execution
 
@@ -399,4 +415,4 @@ Open an issue at `https://github.com/aziz-sudrajat/azzx`.
 
 ---
 
-*AZZX v10.6 — "Connected". MIT License.*
+*AZZX v10.6.2 — "Connected". MIT License.*

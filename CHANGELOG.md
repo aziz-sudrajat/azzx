@@ -1,5 +1,42 @@
 # Changelog
 
+## v10.6.2 — auditor + compressor
+
+### Auditor agent (`azzx audit`)
+- Every tool call through `run_tool_call` is now recorded (tool, redacted
+  args, duration, outcome) to `agent/audit/audit.jsonl` — the auditor only
+  observes, never blocks. `AutonomousRunner` and `webauto` group calls under
+  run ids (`azzx audit report --run <id>`).
+- `azzx audit list|stats` — what happened, success rates, worst tools.
+- `azzx audit report --run <id>` — rule-based findings: repeated failures,
+  permission denials, high-risk tools, slow calls, timeouts; rule score 0-100.
+- `azzx audit report --run <id> --judge` — an LLM judge grades the run
+  against its goal (score, verdict, issues, suggestions).
+
+### Token compressor (`azzx compress`)
+- `azzx compress <file> [--budget N] [--strategy auto|signatures|extractive|
+  head_tail|summarize] [--query ...]` — shrink big files before they enter
+  AI context, with stats (chars/tokens before→after, ratio, strategy used).
+- `signatures`: AST-based Python condensing (signatures + docstrings only,
+  70-90% savings); `extractive`: query-focused line selection; `head_tail`;
+  `summarize`: LLM summary for prose.
+- `azzx ask` now uses smart compression instead of crude truncation when
+  files exceed the context budget. Agent tool: `context.compress`.
+
+## v10.6.1 — patch
+
+- Fix README install instructions: `pip install ./azzx` was wrong (no
+  packaging metadata exists) — the real install is `bash install.sh`
+  (venv + deps + `azzx` launcher), with a manual venv alternative documented.
+- Fix README version badge (was stuck on 10.5.0).
+- Audit fixes: monotonic todo IDs after clear, defensive learning-distill
+  importance parsing, honest checkpoint rollback semantics (overlay +
+  pre-rollback safety checkpoint), Telegram `/auto` plan preview + `/autoy`
+  confirm (no `input()` hang on headless gateways), SMTP port 465 support,
+  GUI auto-run list capped at 50, `/clear` actually clears chat history,
+  `azzx setup --name/--language/--timezone/--notes` flags, missing
+  `webagent`/`cronutil` package exports.
+
 ## v10.6.0 — "Connected"
 
 ### GUI

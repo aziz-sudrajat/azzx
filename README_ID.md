@@ -1,17 +1,17 @@
-# AZZX v10.6 — Sahabat AI Pribadimu
+# AZZX v10.6.2 — Sahabat AI Pribadimu
 
 **Satu AI agent terpadu untuk terminal.** Ngobrol dengannya seperti teman, biarkan
 dia merencanakan dan mengeksekusi tugas secara mandiri, dan jalankan di mana saja —
 dari PC kentang sampai HP Android dengan Termux.
 
 ```bash
-pip install ./azzx              # atau: bash install.sh
+bash install.sh                 # install ke ~/.local/share + perintah `azzx`
 azzx setup                      # kenalkan namamu (tersimpan lokal, privat)
 azzx chat                       # ngobrol dengan companion
 azzx auto "rapikan folder download"   # otonom: rencana → setujui → eksekusi → belajar
 ```
 
-[![Version](https://img.shields.io/badge/version-10.5.0-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.6.2-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 
@@ -56,12 +56,14 @@ bahkan bisa dihubungi dari HP lewat Telegram.
 **Syarat:** Python 3.10+, ~50 MB disk, ~100 MB RAM. Itu saja.
 
 ```bash
-# Opsi A — pip (disarankan)
-pip install ./azzx
-# Opsi B — script installer
+# Disarankan — script installer (venv + dep + launcher `azzx` di PATH)
 bash install.sh
-# Opsi C — Termux (Android)
-pkg install python git && pip install ./azzx
+# Termux (Android)
+pkg install python git && bash install.sh
+# Manual (tanpa installer): butuh Python 3.10+
+python3 -m venv .venv && . .venv/bin/activate
+pip install httpx rich
+python3 azzx_cli.py --version
 ```
 
 Cek instalasi:
@@ -159,6 +161,20 @@ Agent juga mencatat kerjanya sendiri via tool `todo.add` / `todo.list` /
 | `azzx remember "<catatan>"` | Tambah ke memori *project* (`.azzx/memory.md`) | `azzx remember "pakai uv, bukan pip"` |
 
 Rahasia (API key, token, private key) **ditolak** di gerbang memori.
+
+### Audit & kompres
+
+| Command | Fungsi | Contoh |
+|---|---|---|
+| `azzx audit stats` | Success rate, denial, tool terburuk di semua run | `azzx audit stats` |
+| `azzx audit list` | Tool call yang teraudit (`--run <id>` untuk filter) | `azzx audit list --limit 20` |
+| `azzx audit report --run <id>` | Laporan kebenaran berbasis aturan (skor 0-100 + temuan) | `azzx audit report --run run-abc123` |
+| `azzx audit report --run <id> --judge` | Minta AI provider menilai run tersebut | `azzx audit report --run run-abc123 --judge` |
+| `azzx compress <file>` | Kecilkan file besar sebelum masuk konteks AI | `azzx compress big.py --budget 8000` |
+
+Strategi kompresor: `signatures` (AST Python — hemat 70-90%), `extractive`
+(fokus query), `head_tail`, `summarize` (LLM). `azzx ask` memakainya otomatis
+saat file melebihi budget konteks.
 
 ### Eksekusi sandbox
 
@@ -383,4 +399,4 @@ Issue di `https://github.com/aziz-sudrajat/azzx`.
 
 ---
 
-*AZZX v10.6 — "Connected". MIT License.*
+*AZZX v10.6.2 — "Connected". MIT License.*

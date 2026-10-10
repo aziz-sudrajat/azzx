@@ -8,6 +8,6 @@ Coding agent, Universal App Installer, and v6 foundations remain available
 through the main CLI entry point.
 """
 
-__version__ = "10.6.0"
+__version__ = "10.6.2"
 __app_name__ = "AZZATSSINS LITE AGENT"
 __app_slug__ = "azzatssins-lite-agent"
