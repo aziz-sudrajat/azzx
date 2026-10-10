@@ -1,0 +1,9 @@
+{
+  "name": "daily-health",
+  "description": "System health + git status + connectivity",
+  "steps": [
+    {"tool": "sys.health", "args": {}},
+    {"tool": "git.status", "args": {"path": "."}},
+    {"tool": "net.connectivity", "args": {}}
+  ]
+}

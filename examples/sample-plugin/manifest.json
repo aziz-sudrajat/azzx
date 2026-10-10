@@ -1,0 +1,10 @@
+{
+  "id": "sample-echo",
+  "name": "Sample Echo Plugin",
+  "version": "1.0.0",
+  "description": "Example v9 plugin — registers a harmless echo tool",
+  "tools": ["sample.echo"],
+  "permissions": [],
+  "entrypoint": "plugin.py",
+  "enabled": true
+}
