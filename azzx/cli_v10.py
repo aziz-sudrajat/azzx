@@ -1,4 +1,6 @@
-"""CLI handlers for v7–v10 features (toolkit, workflow, device/mirror, plugins, tools)."""
+"""CLI handlers for v7–v10 features (toolkit, workflow, device/mirror, plugins,
+tools, and the native v10.4 agent commands: agent, queue, schedule, recall,
+trace, session, skills)."""
 from __future__ import annotations
 
 import json
@@ -35,7 +37,6 @@ def _guard(fn):
     return wrapper
 
 
-
 def _print_json(data: Any) -> None:
     try:
         from rich.console import Console
@@ -45,6 +46,16 @@ def _print_json(data: Any) -> None:
         c.print(Syntax(text, "json", theme="monokai", word_wrap=True))
     except Exception:
         print(json.dumps(data, indent=2, ensure_ascii=False, default=str))
+
+
+def _parse_json_arg(raw: str, flag: str = "--args") -> dict[str, Any]:
+    try:
+        payload = json.loads(raw or "{}")
+    except ValueError as exc:
+        raise AzzxError(f"{flag} must be valid JSON: {exc}")
+    if not isinstance(payload, dict):
+        raise AzzxError(f"{flag} must be a JSON object")
+    return payload
 
 
 @_guard
@@ -72,12 +83,7 @@ def cmd_tools_list() -> int:
 @_guard
 def cmd_tool_run(name: str, args_json: str = "{}", yes: bool = False) -> int:
     register_all()
-    try:
-        args = json.loads(args_json) if args_json else {}
-        if not isinstance(args, dict):
-            raise AzzxError("args must be a JSON object")
-    except json.JSONDecodeError as exc:
-        raise AzzxError(f"Invalid JSON args: {exc}") from exc
+    args = _parse_json_arg(args_json)
     result = run_tool_call(name, args, noninteractive=yes)
     _print_json(result)
     return 0
@@ -151,11 +157,6 @@ def cmd_mirror(action: str, serial: str = "", max_size: int = 0, bit_rate: int =
         _print_json(list_devices())
         return 0
     if action == "start":
-        # Permission prompts happen inside mirror_start unless we need --yes path
-        if yes:
-            # temporarily allow by relying on noninteractive only when policy is allow;
-            # mirror_start uses require_permission which respects config
-            pass
         result = mirror_start(
             serial=serial,
             max_size=max_size or 0,
@@ -218,192 +219,476 @@ def cmd_toolkit(kind: str, **kwargs: Any) -> int:
 
 
 # ---------------------------------------------------------------------------
-# v10.2 Hermes-like commands
+# v10.4 native agent commands (one unified agent — no separate modes)
 # ---------------------------------------------------------------------------
 
+def cmd_hermes_migration() -> int:
+    """`azzx hermes` was removed in v10.4: print where each feature moved."""
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        from rich import box
+        c = Console()
+        t = Table(title="azzx hermes → removed in v10.4 (one unified agent)",
+                  box=box.ROUNDED, show_lines=False)
+        t.add_column("Old", style="dim")
+        t.add_column("New")
+        rows = [
+            ("hermes think …", "azzx agent \"…\" [--agents planner,coder,…]"),
+            ("hermes memory …", "azzx recall search|add|list|delete|rebuild|stats"),
+            ("hermes trace", "azzx trace [--limit N] [--kind K]"),
+            ("hermes queue …", "azzx queue submit|list|status|result|cancel|resume"),
+            ("hermes schedule …", "azzx schedule list|add|remove|run-due"),
+            ("hermes stream …", "azzx ask --stream \"…\""),
+        ]
+        for old, new in rows:
+            t.add_row(old, new)
+        c.print(t)
+        c.print("[dim]The capabilities are unchanged — only the separate "
+                "`hermes` mode is gone.[/]")
+    except Exception:
+        print("azzx hermes was removed in v10.4. Use: agent, recall, trace, queue, schedule, skills.")
+    return 2
+
+
 @_guard
-def cmd_hermes(args: Any, root: Any = None, forced_provider: str | None = None) -> int:
-    """Dispatch `azzx hermes <think|memory|trace|queue|stream>`."""
-    from azzx.agent.memory import get_memory_store
-    from azzx.agent.multi_agent import get_multi_agent_orchestrator
-    from azzx.agent.tasks import get_task_queue
-    from azzx.agent.tracer import get_tracer
+def cmd_agent(args: Any, root: Any = None, forced_provider: str | None = None) -> int:
+    """Run the unified multi-agent pipeline against the configured provider."""
+    from azzx.agent.multi_agent import MultiAgentOrchestrator
 
-    action = getattr(args, "hermes_action", None)
-
-    if action == "think":
-        prompt = " ".join(getattr(args, "prompt", []) or []).strip()
-        if not prompt:
-            raise AzzxError("think membutuhkan prompt")
-        agents_raw = (getattr(args, "agents", "") or "").strip()
-        order = [a.strip() for a in agents_raw.split(",") if a.strip()] or None
-        show_reasoning = not getattr(args, "hide_reasoning", False)
-        orch = get_multi_agent_orchestrator()
-        result = orch.run_task(prompt, agent_order=order)
+    if getattr(args, "roles", False):
+        orch = MultiAgentOrchestrator()
         try:
             from rich.console import Console
-            from rich.panel import Panel
+            from rich.table import Table
+            from rich import box
             c = Console()
-            for entry in result.get("results", []):
-                agent = entry.get("agent", "?")
-                c.print(Panel(str(entry.get("output", "")), title=f"[{agent}] {entry.get('role', '')}", border_style="cyan"))
-                if show_reasoning:
-                    reasoning = entry.get("reasoning") or {}
-                    steps = reasoning.get("steps", [])
-                    if steps:
-                        lines = [f"  {s['kind'].upper():<10} {s['content']}" for s in steps]
-                        c.print(Panel("\n".join(lines), title=f"reasoning: {agent}", border_style="dim"))
+            t = Table(title="AZZX agent roles", box=box.ROUNDED)
+            t.add_column("Role")
+            t.add_column("Read-only")
+            t.add_column("Tools")
+            t.add_column("Description")
+            for p in orch.list_profiles():
+                t.add_row(p["name"], "yes" if p["read_only"] else "no",
+                          ", ".join(p["allowed_tools"]) or "-",
+                          p["description"])
+            c.print(t)
         except Exception:
-            _print_json(result)
+            _print_json(orch.list_profiles())
         return 0
 
-    if action == "memory":
+    prompt = " ".join(getattr(args, "text", []) or []).strip()
+    if not prompt:
+        raise AzzxError("Usage: azzx agent \"<task>\" [--agents planner,coder,…]  (or --roles to list roles)")
+    order = [a.strip() for a in (getattr(args, "agents", "") or "").split(",") if a.strip()] or None
+
+    context = ""
+    try:  # workspace context is a CLI-layer concern; never break the run
+        from azzx_cli import build_workspace_context, load_config
+        cfg = load_config()
+        context, _selected, _files = build_workspace_context(root, prompt, cfg)
+    except Exception:
+        context = ""
+
+    orch = MultiAgentOrchestrator()
+    yes = bool(getattr(args, "yes", False))
+    try:
+        result = orch.run_task(
+            prompt,
+            context=context,
+            agent_order=order,
+            forced_provider=forced_provider,
+            parallel=bool(getattr(args, "parallel", False)),
+            fail_fast=bool(getattr(args, "fail_fast", False)),
+            session_id=(getattr(args, "session", "") or None),
+            noninteractive=yes,
+            force_yes=yes,
+        )
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+        return 130
+
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.markdown import Markdown
+        c = Console()
+        for entry in result.get("results", []):
+            status = entry.get("status", "?")
+            color = "green" if status == "ok" else "red"
+            title = f"[{entry.get('agent', '?')}] {entry.get('role', '')}  [{color}]{status}[/{color}]"
+            if entry.get("provider"):
+                title += f"  [dim]{entry['provider']}/{entry.get('model', '')}[/dim]"
+            body = entry.get("summary", "") or "(no output)"
+            if entry.get("error"):
+                body += f"\n\n[red]Error: {entry['error']}[/red]"
+            findings = entry.get("findings") or []
+            if findings:
+                body += "\n\nFindings:\n" + "\n".join(f"- {f}" for f in findings[:8])
+            tools = entry.get("tool_calls") or []
+            if tools:
+                lines = []
+                for tc in tools:
+                    mark = "✓" if tc.get("ok") else "✗"
+                    lines.append(f"{mark} {tc.get('tool')}")
+                body += "\n\nTools:\n" + "\n".join(lines)
+            c.print(Panel(Markdown(body), title=title, border_style="cyan"))
+        failed = result.get("failed_agents") or []
+        if failed:
+            c.print(f"[yellow]{len(failed)} agent(s) failed: {', '.join(failed)}[/yellow]")
+        c.print(f"[dim]pipeline status: {result.get('status')}[/dim]")
+    except Exception:
+        _print_json(result)
+    return 0 if result.get("status") == "ok" else 1
+
+
+@_guard
+def cmd_queue(args: Any) -> int:
+    from azzx.agent.orchestrator import register_all as _reg
+    from azzx.agent.tasks import TaskQueue, get_task_queue, spawn_drainer
+
+    _reg()
+    action = getattr(args, "queue_action", None)
+    if action == "submit":
+        tool = getattr(args, "tool", "")
+        tool_args = _parse_json_arg(getattr(args, "args", "{}") or "{}")
+        try:
+            REGISTRY.get(tool)
+        except AzzxError as exc:
+            raise AzzxError(str(exc))
+        # No in-process worker for CLI one-shots: the detached drainer owns
+        # execution, so a dying CLI process can't half-run the task.
+        q = TaskQueue(auto_worker=False)
+        task_id = q.submit_tool(tool, tool_args, approved=bool(getattr(args, "yes", False)))
+        if not spawn_drainer():
+            raise AzzxError("Failed to launch the background worker")
+        print(task_id)
+        return 0
+    q = TaskQueue(auto_worker=False)
+    if action == "list":
+        status = (getattr(args, "status", "") or "").strip() or None
+        _print_json(q.list_tasks(status=status))
+        return 0
+    if action == "status":
+        snap = q.status(getattr(args, "task_id", ""))
+        if snap is None:
+            # The task may belong to another process's state file — refresh.
+            raise AzzxError("task not found")
+        _print_json(snap)
+        return 0
+    if action == "result":
+        snap = q.result(getattr(args, "task_id", ""), timeout=float(getattr(args, "wait", 0) or 0))
+        if snap is None:
+            raise AzzxError("task not found")
+        _print_json(snap)
+        return 0
+    if action == "cancel":
+        if not q.cancel(getattr(args, "task_id", "")):
+            raise AzzxError("task not found or already running/finished (only queued tasks can be cancelled)")
+        print("Task cancelled")
+        return 0
+    if action == "resume":
+        if not q.resume_task(getattr(args, "task_id", "")):
+            raise AzzxError("task not found or not resumable (only interrupted/error/cancelled)")
+        if not spawn_drainer():
+            raise AzzxError("Failed to launch the background worker")
+        print("Task requeued")
+        return 0
+    raise AzzxError("queue action not recognized")
+
+
+@_guard
+def cmd_schedule(args: Any) -> int:
+    from azzx.agent.scheduler import ToolScheduler
+    register_all()
+    scheduler = ToolScheduler()
+    action = getattr(args, "schedule_action", "list")
+    if action == "list":
+        _print_json(scheduler.list())
+        return 0
+    if action == "add":
+        tool_args = _parse_json_arg(getattr(args, "args", "{}") or "{}")
+        job = scheduler.add(
+            getattr(args, "tool", ""), tool_args,
+            int(getattr(args, "every", 3600)),
+            getattr(args, "name", ""),
+        )
+        _print_json(job)
+        return 0
+    if action == "remove":
+        if not scheduler.remove(getattr(args, "job_id", "")):
+            raise AzzxError("schedule ID not found")
+        print("Schedule removed")
+        return 0
+    if action == "run-due":
+        _print_json(scheduler.run_due(limit=int(getattr(args, "limit", 20))))
+        return 0
+    raise AzzxError("schedule action not recognized")
+
+
+@_guard
+def cmd_recall(args: Any) -> int:
+    """Persistent agent memory: search/add/list/delete/rebuild/stats."""
+    from azzx.agent.memory import get_memory_store
+    store = get_memory_store()
+    action = getattr(args, "recall_action", None)
+
+    if action == "search":
         query = " ".join(getattr(args, "query", []) or []).strip()
         mode = getattr(args, "mode", "hybrid")
         limit = int(getattr(args, "limit", 8) or 8)
-        store = get_memory_store()
+        project = (getattr(args, "project", "") or "").strip() or None
+        agent = (getattr(args, "agent", "") or "").strip() or None
         if mode == "keyword":
-            hits = [(m, 1.0) for m in store.search(query, limit=limit, min_importance=0.0)]
+            hits = [(m, 1.0) for m in store.search(query, agent_id=agent, project=project,
+                                                   limit=limit, min_importance=0.0)]
         elif mode == "semantic":
-            hits = store.search_semantic(query, limit=limit)
+            hits = store.search_semantic(query, agent_id=agent, project=project, limit=limit)
         else:
-            hits = store.search_hybrid(query, limit=limit)
-        rows = [
-            {
-                "score": round(score, 3),
-                "agent": m.agent_id,
-                "type": m.memory_type,
-                "importance": m.importance,
-                "content": (m.content or "")[:220],
-            }
-            for m, score in hits
-        ]
+            hits = store.search_hybrid(query, agent_id=agent, project=project, limit=limit)
+        rows = [{
+            "id": m.id, "score": round(s, 3), "agent": m.agent_id,
+            "type": m.memory_type, "importance": m.importance,
+            "shared": m.shared, "project": m.project,
+            "content": (m.content or "")[:220],
+        } for m, s in hits]
         try:
             from rich.console import Console
             from rich.table import Table
             from rich import box
             c = Console()
             t = Table(title=f"Memory ({mode}): {query[:60]}", box=box.ROUNDED)
-            t.add_column("Score", justify="right")
-            t.add_column("Agent")
-            t.add_column("Type")
-            t.add_column("Content")
+            for col in ("ID", "Score", "Agent", "Type", "Content"):
+                t.add_column(col, justify="right" if col in ("ID", "Score") else "left")
             for r in rows:
-                t.add_row(str(r["score"]), r["agent"], r["type"], r["content"])
+                t.add_row(str(r["id"]), str(r["score"]), r["agent"], r["type"], r["content"])
             c.print(t)
         except Exception:
             _print_json(rows)
         return 0
 
-    if action == "trace":
-        limit = int(getattr(args, "limit", 20) or 20)
-        kind = (getattr(args, "kind", "") or "").strip() or None
-        tracer = get_tracer()
-        items = tracer.recent_from_log(limit * 2)
-        if kind:
-            items = [i for i in items if i.get("kind") == kind][:limit]
-        else:
-            items = items[:limit]
-        try:
-            from rich.console import Console
-            from rich.table import Table
-            from rich import box
-            c = Console()
-            t = Table(title="Execution timeline", box=box.ROUNDED)
-            t.add_column("Span")
-            t.add_column("Kind")
-            t.add_column("Duration", justify="right")
-            t.add_column("Status")
-            for i in items:
-                status = i.get("status", "?")
-                style = "red" if status == "error" else "green"
-                t.add_row(
-                    str(i.get("name", ""))[:48],
-                    str(i.get("kind", "")),
-                    f"{i.get('duration_ms', 0)} ms",
-                    f"[{style}]{status}[/{style}]",
-                )
-            c.print(t)
-            stats = tracer.stats()
-            c.print(f"[dim]spans this session: {stats['spans']} | errors: {stats['errors']} | total {stats['total_ms']} ms[/]")
-        except Exception:
-            _print_json(items)
+    if action == "add":
+        text = " ".join(getattr(args, "text", []) or []).strip()
+        if not text:
+            raise AzzxError("recall add needs text")
+        tags = [t.strip() for t in (getattr(args, "tags", "") or "").split(",") if t.strip()]
+        mid = store.store(
+            agent_id=(getattr(args, "agent", "") or "user").strip() or "user",
+            content=text,
+            memory_type=getattr(args, "type", "fact") or "fact",
+            importance=float(getattr(args, "importance", 0.7) or 0.7),
+            tags=tags,
+            shared=not bool(getattr(args, "private", False)),
+            project=(getattr(args, "project", "") or "").strip(),
+        )
+        print(mid)
         return 0
 
-    if action == "queue":
-        q_action = getattr(args, "queue_action", None)
-        if q_action == "submit":
-            tool = getattr(args, "tool", "")
-            try:
-                tool_args = json.loads(getattr(args, "args", "{}") or "{}")
-            except ValueError as exc:
-                raise AzzxError(f"--args harus JSON valid: {exc}")
-            # No in-process worker for CLI one-shots: the detached drainer
-            # owns execution, so a dying CLI process can't half-run the task.
-            from azzx.agent.tasks import TaskQueue, spawn_drainer
-            q = TaskQueue(auto_worker=False)
-            task_id = q.submit_tool(tool, tool_args if isinstance(tool_args, dict) else {})
-            if not spawn_drainer():
-                raise AzzxError("gagal meluncurkan background worker")
-            print(task_id)
-            return 0
-        q = get_task_queue()
-        if q_action == "list":
-            _print_json(q.list_tasks())
-            return 0
-        if q_action == "status":
-            snap = q.status(getattr(args, "task_id", ""))
-            if snap is None:
-                raise AzzxError("task tidak ditemukan")
-            _print_json(snap)
-            return 0
-        if q_action == "result":
-            snap = q.result(getattr(args, "task_id", ""), timeout=float(getattr(args, "wait", 0) or 0))
-            if snap is None:
-                raise AzzxError("task tidak ditemukan")
-            _print_json(snap)
-            return 0
-        raise AzzxError("queue action tidak dikenal")
+    if action == "list":
+        entries = store.get_recent(
+            agent_id=(getattr(args, "agent", "") or "").strip() or None,
+            project=(getattr(args, "project", "") or "").strip() or None,
+            limit=int(getattr(args, "limit", 10) or 10),
+            include_private=True,
+        )
+        _print_json([e.to_dict() for e in entries])
+        return 0
 
-    if action == "schedule":
-        from azzx.agent.orchestrator import register_all
-        from azzx.agent.scheduler import ToolScheduler
-        register_all()
-        scheduler = ToolScheduler()
-        schedule_action = getattr(args, "schedule_action", "list")
-        if schedule_action == "list":
-            _print_json(scheduler.list())
-            return 0
-        if schedule_action == "add":
-            try:
-                payload = json.loads(getattr(args, "args", "{}") or "{}")
-            except ValueError as exc:
-                raise AzzxError(f"--args harus JSON valid: {exc}")
-            if not isinstance(payload, dict):
-                raise AzzxError("--args harus berupa JSON object")
-            job = scheduler.add(
-                getattr(args, "tool", ""), payload,
-                int(getattr(args, "every", 3600)),
-                getattr(args, "name", ""),
+    if action == "delete":
+        if not store.delete(int(getattr(args, "memory_id", 0))):
+            raise AzzxError("memory ID not found")
+        print("Memory deleted")
+        return 0
+
+    if action == "rebuild":
+        n = store.rebuild_vectors()
+        print(f"Rebuilt semantic index for {n} memories")
+        return 0
+
+    if action == "stats":
+        _print_json(store.get_stats())
+        return 0
+
+    raise AzzxError("recall action not recognized")
+
+
+@_guard
+def cmd_trace(args: Any) -> int:
+    from azzx.agent.tracer import get_tracer
+    tracer = get_tracer()
+    if getattr(args, "clear", False):
+        tracer.clear()
+        print("Timeline cleared")
+        return 0
+    limit = int(getattr(args, "limit", 20) or 20)
+    kind = (getattr(args, "kind", "") or "").strip() or None
+    items = tracer.recent_from_log(limit * 2)
+    if kind:
+        items = [i for i in items if i.get("kind") == kind][:limit]
+    else:
+        items = items[:limit]
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        from rich import box
+        c = Console()
+        t = Table(title="Execution timeline", box=box.ROUNDED)
+        t.add_column("Span")
+        t.add_column("Kind")
+        t.add_column("Duration", justify="right")
+        t.add_column("Status")
+        for i in items:
+            status = i.get("status", "?")
+            style = "red" if status == "error" else "green"
+            t.add_row(
+                str(i.get("name", ""))[:48],
+                str(i.get("kind", "")),
+                f"{i.get('duration_ms', 0)} ms",
+                f"[{style}]{status}[/{style}]",
             )
-            _print_json(job)
-            return 0
-        if schedule_action == "remove":
-            if not scheduler.remove(getattr(args, "job_id", "")):
-                raise AzzxError("schedule ID tidak ditemukan")
-            print("Schedule removed")
-            return 0
-        if schedule_action == "run-due":
-            _print_json(scheduler.run_due(limit=int(getattr(args, "limit", 20))))
-            return 0
-        raise AzzxError("schedule action tidak dikenal")
+        c.print(t)
+        stats = tracer.stats()
+        c.print(f"[dim]spans this session: {stats['spans']} | errors: {stats['errors']} | "
+                f"total {stats['total_ms']} ms[/]")
+    except Exception:
+        _print_json(items)
+    return 0
 
-    if action == "stream":
-        prompt = " ".join(getattr(args, "prompt", []) or []).strip()
-        if not prompt:
-            raise AzzxError("stream membutuhkan prompt")
-        from azzx_cli import run_stream_ask  # lazy: azzx_cli owns the AI pipeline
-        images = getattr(args, "image", []) or []
-        return run_stream_ask(root, prompt, forced_provider, images)
 
-    raise AzzxError("hermes action tidak dikenal")
+@_guard
+def cmd_session(args: Any) -> int:
+    from azzx.agent.session import get_session_journal
+    journal = get_session_journal()
+    action = getattr(args, "session_action", None)
+
+    if action == "start":
+        project = (getattr(args, "project", "") or "").strip()
+        if not project:
+            raise AzzxError("session start needs a PROJECT name")
+        title = " ".join(getattr(args, "title", []) or []).strip() or project
+        sid = journal.start_session(project, title)
+        print(sid)
+        return 0
+
+    if action == "log":
+        message = " ".join(getattr(args, "message", []) or []).strip()
+        if not message:
+            raise AzzxError("session log needs a message")
+        journal.log_event(
+            getattr(args, "session_id", ""),
+            (getattr(args, "agent", "") or "user").strip() or "user",
+            (getattr(args, "stage", "") or "note").strip() or "note",
+            message,
+        )
+        journal.touch_session(getattr(args, "session_id", ""))
+        print("Logged")
+        return 0
+
+    if action == "end":
+        ok = journal.end_session(
+            getattr(args, "session_id", ""),
+            status=getattr(args, "status", "done") or "done",
+            summary=getattr(args, "summary", "") or "",
+        )
+        if not ok:
+            raise AzzxError("session not found")
+        print("Session ended")
+        return 0
+
+    if action == "resume":
+        try:
+            bundle = journal.resume_session(getattr(args, "session_id", ""))
+        except KeyError as exc:
+            raise AzzxError(str(exc))
+        _print_json(bundle)
+        return 0
+
+    if action == "list":
+        _print_json(journal.get_recent_sessions(
+            project=(getattr(args, "project", "") or "").strip() or None,
+            status=(getattr(args, "status", "") or "").strip() or None,
+        ))
+        return 0
+
+    if action == "stale":
+        _print_json(journal.find_stale(
+            project=(getattr(args, "project", "") or "").strip() or None,
+            stale_hours=float(getattr(args, "hours", 24.0) or 24.0),
+        ))
+        return 0
+
+    raise AzzxError("session action not recognized")
+
+
+@_guard
+def cmd_skills(args: Any) -> int:
+    from azzx.agent.skills import SkillRegistry
+    reg = SkillRegistry()
+    action = getattr(args, "skill_action", None)
+
+    if action == "list":
+        rows = []
+        for m in reg.list():
+            if m.get("error"):
+                rows.append({"id": m["id"], "error": m["error"]})
+            else:
+                rows.append({
+                    "id": m["id"], "name": m["name"], "version": m["version"],
+                    "description": m["description"][:80],
+                    "trusted": m["trusted"], "enabled": m["enabled"],
+                    "permissions": m["permissions"],
+                })
+        _print_json(rows)
+        return 0
+
+    if action == "find":
+        query = " ".join(getattr(args, "query", []) or []).strip()
+        _print_json([{
+            "id": m["id"], "name": m["name"], "version": m["version"],
+            "description": m["description"][:120],
+            "trusted": m["trusted"], "enabled": m["enabled"],
+        } for m in reg.find(query)])
+        return 0
+
+    if action == "show":
+        _print_json(reg._read_manifest(getattr(args, "skill_id", "")))
+        return 0
+
+    if action == "install":
+        _print_json(reg.install(getattr(args, "source", ""),
+                                trust=bool(getattr(args, "trust", False))))
+        return 0
+
+    if action == "uninstall":
+        if not reg.uninstall(getattr(args, "skill_id", "")):
+            raise AzzxError("skill not found")
+        print("Skill uninstalled")
+        return 0
+
+    if action == "trust":
+        _print_json(reg.trust(getattr(args, "skill_id", "")))
+        return 0
+
+    if action == "untrust":
+        _print_json(reg.untrust(getattr(args, "skill_id", "")))
+        return 0
+
+    if action == "enable":
+        _print_json(reg.enable(getattr(args, "skill_id", "")))
+        return 0
+
+    if action == "disable":
+        _print_json(reg.disable(getattr(args, "skill_id", "")))
+        return 0
+
+    if action == "invoke":
+        tool_args = _parse_json_arg(getattr(args, "args", "{}") or "{}")
+        result = reg.invoke(
+            getattr(args, "skill_id", ""), tool_args,
+            noninteractive=bool(getattr(args, "yes", False)),
+            force_yes=bool(getattr(args, "yes", False)),
+        )
+        _print_json(result)
+        return 0
+
+    raise AzzxError("skills action not recognized")

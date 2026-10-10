@@ -7,6 +7,7 @@ from typing import Any
 from azzx.agent.memory import MemoryStore, get_memory_store as _memory_store_factory
 from azzx.agent.message_bus import get_message_bus as _message_bus_factory
 from azzx.agent.multi_agent import MultiAgentOrchestrator, get_multi_agent_orchestrator
+from azzx.agent.skills import register_skill_tools
 from azzx.agent.streaming import AgentStream, stream_task_progress
 from azzx.agent.tracer import get_tracer
 from azzx.core import DATA_HOME, REGISTRY, AzzxError
@@ -29,6 +30,10 @@ def register_all() -> None:
     register_workflow_tools()
     register_all_device_tools()
     register_plugin_tools()
+    try:
+        register_skill_tools()
+    except Exception:  # noqa: BLE001 — skills must not break boot
+        pass
     try:
         load_enabled_plugins()
     except Exception:  # noqa: BLE001 — plugins must not break boot

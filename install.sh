@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 APP_NAME="AZZATSSINS LITE AGENT"
 APP_SLUG="azzatssins-lite-agent"
-APP_VERSION="10.3.0"
+APP_VERSION="10.4.0"
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/${APP_SLUG}"
 VENV_DIR="$APP_DIR/venv"

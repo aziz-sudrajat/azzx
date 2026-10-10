@@ -1,12 +1,24 @@
-"""SQLite-backed persistent memory for the AZZX multi-agent layer (v10.1).
+"""SQLite-backed persistent memory for the AZZX agent layer (v10.4).
 
 Lightweight and Termux-friendly: long-term agent memory without external
 ML dependencies. Connections are always closed via try/finally so a failed
 operation can never leave the database locked.
+
+Safety properties:
+- Exact-duplicate memories are not stored twice (content hash).
+- Content that looks like a secret (API keys, tokens, private keys,
+  ``password = "..."`` assignments) is *refused* — never persisted.
+- Visibility: an agent always sees its own memories; other agents' memories
+  only when marked ``shared``. ``include_private=True`` is an explicit,
+  auditable override.
+- ``delete()`` removes both the entry and its semantic vector, so deleted
+  memories can never resurface in semantic search.
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -16,6 +28,35 @@ from typing import Any, Iterable
 
 from azzx.core import DATA_HOME
 from azzx.agent.embeddings import SimpleEmbedder
+
+MEMORY_TYPES = {
+    "fact", "decision", "interaction", "preference", "project",
+    "observation", "plan", "result",
+}
+_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+
+# Patterns that indicate secret material. Matched against content before
+# storage; the *value* is never echoed back in the refusal message.
+_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("private key block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")),
+    ("aws access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("openai-style key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")),
+    ("google api key", re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b")),
+    ("github token", re.compile(r"\b(?:ghp|gho|github_pat)_[A-Za-z0-9_]{20,}\b")),
+    ("slack token", re.compile(r"\bxox[bap]-[A-Za-z0-9-]{10,}\b")),
+    ("credential assignment", re.compile(
+        r"(?i)\b(api[_-]?key|secret|token|password|passwd|pwd|client[_-]?secret)\b"
+        r"\s*[:=]\s*['\"]?[^\s'\"]{8,}['\"]?"
+    )),
+]
+
+
+def find_secret_kind(content: str) -> str | None:
+    """Return the matched secret kind, or None if the content looks safe."""
+    for kind, pattern in _SECRET_PATTERNS:
+        if pattern.search(content or ""):
+            return kind
+    return None
 
 
 @dataclass
@@ -30,6 +71,7 @@ class MemoryEntry:
     importance: float = 0.5
     created_at: str = ""
     shared: bool = True
+    project: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -41,15 +83,12 @@ class MemoryEntry:
             "importance": float(self.importance),
             "created_at": self.created_at,
             "shared": bool(self.shared),
+            "project": self.project,
         }
 
 
 class MemoryStore:
-    """SQLite-backed memory layer for agent continuity.
-
-    This is intentionally lightweight and Termux-friendly. It provides short-term
-    and long-term memory storage without external ML dependencies.
-    """
+    """SQLite-backed memory layer for agent continuity."""
 
     def __init__(self, config_dir: str | Path | None = None, db_name: str = "azzx_memory.db") -> None:
         self.root = Path(config_dir) if config_dir is not None else DATA_HOME / "agent"
@@ -79,15 +118,23 @@ class MemoryStore:
                 )
                 """
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_memory_agent ON memory_entries(agent_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(memory_type)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_memory_shared ON memory_entries(shared)"
-            )
+            # Additive migrations for databases created by older versions.
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(memory_entries)").fetchall()}
+            if "project" not in cols:
+                conn.execute("ALTER TABLE memory_entries ADD COLUMN project TEXT NOT NULL DEFAULT ''")
+            if "content_sha" not in cols:
+                conn.execute("ALTER TABLE memory_entries ADD COLUMN content_sha TEXT NOT NULL DEFAULT ''")
+                # Backfill hashes for pre-existing rows so dedup works going forward.
+                for row in conn.execute("SELECT id, agent_id, content FROM memory_entries WHERE content_sha = ''"):
+                    conn.execute(
+                        "UPDATE memory_entries SET content_sha = ? WHERE id = ?",
+                        (self._content_hash(str(row["agent_id"]), str(row["content"])), int(row["id"])),
+                    )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_agent ON memory_entries(agent_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(memory_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_shared ON memory_entries(shared)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_entries(project)")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_sha ON memory_entries(content_sha)")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS memory_vectors (
@@ -102,6 +149,39 @@ class MemoryStore:
     def _utcnow() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    @staticmethod
+    def _content_hash(agent_id: str, content: str) -> str:
+        return hashlib.sha256(f"{agent_id}\0{content}".encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _clamp_importance(value: Any) -> float:
+        try:
+            return max(0.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            return 0.5
+
+    @staticmethod
+    def _validate_type(memory_type: str) -> str:
+        mt = (memory_type or "fact").strip().lower()
+        if not _TYPE_RE.match(mt):
+            raise ValueError(
+                f"Invalid memory_type {memory_type!r}: use lowercase letters/digits/underscore "
+                f"(known types: {sorted(MEMORY_TYPES)})"
+            )
+        return mt
+
+    # -- visibility ------------------------------------------------------
+    @staticmethod
+    def _visibility_clause(agent_id: str | None, include_private: bool) -> tuple[str, list[Any]]:
+        """SQL fragment enforcing the shared/private boundary."""
+        if agent_id and not include_private:
+            return "(agent_id = ? OR shared = 1)", [agent_id]
+        if agent_id and include_private:
+            return "1=1", []
+        if include_private:
+            return "1=1", []
+        return "shared = 1", []
+
     def store(
         self,
         agent_id: str,
@@ -110,32 +190,47 @@ class MemoryStore:
         importance: float = 0.5,
         tags: Iterable[str] | None = None,
         shared: bool = True,
+        project: str = "",
     ) -> str:
-        if not agent_id:
-            agent_id = "system"
+        agent_id = (agent_id or "system").strip() or "system"
         normalized = (content or "").strip()
         if not normalized:
             raise ValueError("Memory content cannot be empty")
+        secret_kind = find_secret_kind(normalized)
+        if secret_kind:
+            raise ValueError(
+                f"Refusing to store memory: content looks like a {secret_kind}. "
+                "Memories must never contain secrets; store a pointer instead "
+                "(e.g. 'key kept in the vault')."
+            )
+        memory_type = self._validate_type(memory_type)
+        importance = self._clamp_importance(importance)
         tags_list = sorted({str(tag).strip().lower() for tag in (tags or []) if str(tag).strip()})
+        project = (project or "").strip()[:128]
+        sha = self._content_hash(agent_id, normalized)
         now = self._utcnow()
+
         with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT id FROM memory_entries WHERE content_sha = ?", (sha,)
+            ).fetchone()
+            if row is not None:
+                return str(int(row["id"]))  # exact duplicate: don't store twice
             cursor = conn.execute(
                 """
-                INSERT INTO memory_entries (agent_id, memory_type, content, tags, importance, created_at, shared)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO memory_entries
+                    (agent_id, memory_type, content, tags, importance, created_at, shared, project, content_sha)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    agent_id,
-                    memory_type,
-                    normalized,
+                    agent_id, memory_type, normalized,
                     json.dumps(tags_list, ensure_ascii=False),
-                    float(importance),
-                    now,
-                    1 if shared else 0,
+                    importance, now, 1 if shared else 0, project, sha,
                 ),
             )
             memory_id = int(cursor.lastrowid)
             conn.commit()
+
         # Semantic index (outside the DB transaction; best effort).
         try:
             self._embedder.add_document(normalized)
@@ -151,20 +246,31 @@ class MemoryStore:
             pass
         return str(memory_id)
 
+    def get(self, memory_id: int) -> MemoryEntry | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM memory_entries WHERE id = ?", (int(memory_id),)
+            ).fetchone()
+        return self._row_to_entry(row) if row else None
+
     def get_recent(
         self,
         agent_id: str | None = None,
         limit: int = 10,
         memory_type: str | None = None,
+        project: str | None = None,
+        include_private: bool = False,
     ) -> list[MemoryEntry]:
-        query = "SELECT * FROM memory_entries WHERE 1=1"
-        params: list[Any] = []
-        if agent_id:
-            query += " AND agent_id = ?"
-            params.append(agent_id)
+        vis, params = self._visibility_clause(agent_id, include_private)
+        query = f"SELECT * FROM memory_entries WHERE {vis}"
+        if agent_id and not include_private:
+            pass  # agent_id already bound by the visibility clause
         if memory_type:
             query += " AND memory_type = ?"
             params.append(memory_type)
+        if project:
+            query += " AND project = ?"
+            params.append(project)
         query += " ORDER BY created_at DESC, id DESC LIMIT ?"
         params.append(int(limit))
         with closing(self._connect()) as conn:
@@ -177,26 +283,34 @@ class MemoryStore:
         agent_id: str | None = None,
         limit: int = 10,
         min_importance: float = 0.0,
+        project: str | None = None,
+        include_private: bool = False,
     ) -> list[MemoryEntry]:
+        vis, params = self._visibility_clause(agent_id, include_private)
+        clauses = [vis, "importance >= ?"]
+        params.append(float(min_importance))
         query = (query or "").strip()
         if not query:
-            return self.get_recent(agent_id=agent_id, limit=limit)
-
+            base = f"SELECT * FROM memory_entries WHERE {' AND '.join(clauses)}"
+            if project:
+                base += " AND project = ?"
+                params.append(project)
+            base += " ORDER BY importance DESC, created_at DESC LIMIT ?"
+            params.append(int(limit))
+            with closing(self._connect()) as conn:
+                rows = conn.execute(base, params).fetchall()
+            return [self._row_to_entry(row) for row in rows]
         terms = [part.lower() for part in query.split() if part.strip()]
-        clauses: list[str] = []
-        params: list[Any] = []
-        if agent_id:
-            clauses.append("agent_id = ?")
-            params.append(agent_id)
-        clauses.append("importance >= ?")
-        params.append(float(min_importance))
         for term in terms:
             clauses.append("(LOWER(content) LIKE ? OR LOWER(tags) LIKE ?)")
             params.extend([f"%{term}%", f"%{term}%"])
-        where_sql = " AND ".join(clauses)
+        if project:
+            clauses.append("project = ?")
+            params.append(project)
         with closing(self._connect()) as conn:
             rows = conn.execute(
-                f"SELECT * FROM memory_entries WHERE {where_sql} ORDER BY importance DESC, created_at DESC LIMIT ?",
+                f"SELECT * FROM memory_entries WHERE {' AND '.join(clauses)} "
+                "ORDER BY importance DESC, created_at DESC LIMIT ?",
                 [*params, int(limit)],
             ).fetchall()
         return [self._row_to_entry(row) for row in rows]
@@ -207,26 +321,29 @@ class MemoryStore:
         agent_id: str | None = None,
         limit: int = 10,
         min_score: float = 0.0,
+        project: str | None = None,
+        include_private: bool = False,
     ) -> list[tuple[MemoryEntry, float]]:
-        """Rank memories by semantic (embedding cosine) similarity.
+        """Rank memories by embedding cosine similarity.
 
-        Returns (entry, score) pairs ordered by score descending. Unlike
-        `search()`, this finds memories about the same *meaning* even when
-        they share no literal keywords.
+        The JOIN against ``memory_entries`` guarantees deleted memories never
+        appear here; the visibility clause enforces shared/private boundaries.
         """
         query = (query or "").strip()
+        vis, params = self._visibility_clause(agent_id, include_private)
+        sql = f"""
+            SELECT e.*, v.vector AS vec FROM memory_entries e
+            JOIN memory_vectors v ON v.memory_id = e.id
+            WHERE {vis}
+        """
+        if project:
+            sql += " AND e.project = ?"
+            params.append(project)
         with closing(self._connect()) as conn:
-            rows = conn.execute(
-                """
-                SELECT e.*, v.vector AS vec FROM memory_entries e
-                JOIN memory_vectors v ON v.memory_id = e.id
-                """
-            ).fetchall()
+            rows = conn.execute(sql, params).fetchall()
         candidates: list[tuple[int, dict[str, float]]] = []
         entries: dict[int, MemoryEntry] = {}
         for row in rows:
-            if agent_id and row["agent_id"] != agent_id:
-                continue
             try:
                 vec = json.loads(row["vec"] or "{}")
             except (ValueError, TypeError):
@@ -235,11 +352,8 @@ class MemoryStore:
             entries[int(row["id"])] = entry
             candidates.append((int(row["id"]), {str(k): float(v) for k, v in vec.items()}))
         ranked = self._embedder.most_similar(query, candidates, limit=limit)
-        return [
-            (entries[mid], score)
-            for mid, score in ranked
-            if score >= min_score and mid in entries
-        ]
+        return [(entries[mid], score) for mid, score in ranked
+                if score >= min_score and mid in entries]
 
     def search_hybrid(
         self,
@@ -247,14 +361,14 @@ class MemoryStore:
         agent_id: str | None = None,
         limit: int = 10,
         keyword_weight: float = 0.4,
+        project: str | None = None,
+        include_private: bool = False,
     ) -> list[tuple[MemoryEntry, float]]:
-        """Combine keyword (`search`) and semantic ranking.
-
-        Merges both result sets; entries appearing in both get a boosted
-        score. This is the recommended default for Hermes-like recall.
-        """
-        keyword_hits = self.search(query, agent_id=agent_id, limit=limit * 2)
-        semantic_hits = self.search_semantic(query, agent_id=agent_id, limit=limit * 2)
+        """Combine keyword and semantic ranking; entries in both get boosted."""
+        keyword_hits = self.search(query, agent_id=agent_id, limit=limit * 2,
+                                   project=project, include_private=include_private)
+        semantic_hits = self.search_semantic(query, agent_id=agent_id, limit=limit * 2,
+                                             project=project, include_private=include_private)
         scores: dict[int, float] = {}
         entries: dict[int, MemoryEntry] = {}
         for rank, entry in enumerate(keyword_hits):
@@ -269,63 +383,109 @@ class MemoryStore:
         return [(entries[eid], score) for eid, score in ranked]
 
     def rebuild_vectors(self) -> int:
-        """Re-embed every memory (useful after bulk imports). Returns count."""
+        """Drop the whole semantic index and re-embed every memory.
+
+        Recovers from a missing or outdated index (e.g. after bulk imports
+        or an embedder format change).
+        """
         with closing(self._connect()) as conn:
             rows = conn.execute("SELECT id, content FROM memory_entries").fetchall()
+        # Fresh embedder state: old document frequencies would otherwise skew
+        # the new index.
+        self._embedder = SimpleEmbedder(self._embedder.state_path)
         count = 0
         with closing(self._connect()) as conn:
+            conn.execute("DELETE FROM memory_vectors")
             for row in rows:
                 content = row["content"] or ""
                 self._embedder.add_document(content)
                 vector = self._embedder.embed(content)
                 conn.execute(
-                    "INSERT OR REPLACE INTO memory_vectors (memory_id, vector) VALUES (?, ?)",
+                    "INSERT INTO memory_vectors (memory_id, vector) VALUES (?, ?)",
                     (int(row["id"]), json.dumps(vector, ensure_ascii=False)),
                 )
                 count += 1
             conn.commit()
-        self._embedder.save()
+        try:
+            self._embedder.save()
+        except OSError:
+            pass
         return count
 
+    def verify_index(self) -> dict[str, Any]:
+        """Report index health: entries, vectors, orphans (vectors without entries)."""
+        with closing(self._connect()) as conn:
+            entries = conn.execute("SELECT COUNT(*) FROM memory_entries").fetchone()[0]
+            vectors = conn.execute("SELECT COUNT(*) FROM memory_vectors").fetchone()[0]
+            orphans = conn.execute(
+                "SELECT COUNT(*) FROM memory_vectors v "
+                "LEFT JOIN memory_entries e ON e.id = v.memory_id WHERE e.id IS NULL"
+            ).fetchone()[0]
+        return {"entries": int(entries), "vectors": int(vectors),
+                "orphan_vectors": int(orphans), "healthy": orphans == 0 and vectors <= entries}
+
+    def purge_orphan_vectors(self) -> int:
+        with closing(self._connect()) as conn:
+            cur = conn.execute(
+                "DELETE FROM memory_vectors WHERE memory_id NOT IN (SELECT id FROM memory_entries)"
+            )
+            conn.commit()
+            return int(cur.rowcount)
+
     def get_agent_summary(self, agent_id: str, limit: int = 5) -> list[dict[str, Any]]:
-        entries = self.get_recent(agent_id=agent_id, limit=limit)
-        return [entry.to_dict() for entry in entries]
+        return [e.to_dict() for e in self.get_recent(agent_id=agent_id, limit=limit,
+                                                     include_private=True)]
 
     def get_stats(self) -> dict[str, Any]:
         with closing(self._connect()) as conn:
             row = conn.execute(
                 """
-                SELECT
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN shared = 1 THEN 1 ELSE 0 END) AS shared,
-                    AVG(importance) AS avg_importance
+                SELECT COUNT(*) AS total,
+                       SUM(CASE WHEN shared = 1 THEN 1 ELSE 0 END) AS shared,
+                       AVG(importance) AS avg_importance,
+                       COUNT(DISTINCT agent_id) AS agents,
+                       COUNT(DISTINCT project) AS projects
                 FROM memory_entries
                 """
             ).fetchone()
+        index = self.verify_index()
         return {
             "total": int((row["total"] if row else 0) or 0),
             "shared": int((row["shared"] if row else 0) or 0),
-            "avg_importance": float((row["avg_importance"] if row else 0) or 0.0),
+            "avg_importance": round(float((row["avg_importance"] if row else 0) or 0.0), 3),
+            "agents": int((row["agents"] if row else 0) or 0),
+            "projects": int((row["projects"] if row else 0) or 0),
+            "index": index,
         }
 
     def delete(self, memory_id: int) -> bool:
+        """Delete an entry *and* its semantic vector atomically."""
         with closing(self._connect()) as conn:
+            conn.execute("DELETE FROM memory_vectors WHERE memory_id = ?", (int(memory_id),))
             cursor = conn.execute("DELETE FROM memory_entries WHERE id = ?", (int(memory_id),))
             conn.commit()
             return cursor.rowcount > 0
 
     @staticmethod
     def _row_to_entry(row: sqlite3.Row) -> MemoryEntry:
-        tags = json.loads(row["tags"] or "[]") if row["tags"] else []
+        try:
+            tags = json.loads(row["tags"] or "[]") if row["tags"] else []
+        except (ValueError, TypeError):
+            tags = []
+        try:
+            project = row["project"]
+        except (IndexError, KeyError):
+            project = ""
         return MemoryEntry(
             id=row["id"],
             agent_id=row["agent_id"],
             memory_type=row["memory_type"],
             content=row["content"],
-            tags=list(tags),
+            tags=list(tags) if isinstance(tags, list) else [],
             importance=float(row["importance"]),
             created_at=row["created_at"],
             shared=bool(row["shared"]),
+            project=str(project or ""),
         )
 
 
@@ -340,10 +500,4 @@ def get_memory_store() -> MemoryStore:
     return _DEFAULT_MEMORY_STORE
 
 
-__all__ = ["MemoryEntry", "MemoryStore", "get_memory_store"]
-
-
-if __name__ == "__main__":
-    store = get_memory_store()
-    store.store("demo", "System is healthy and safe", memory_type="fact", importance=0.9, tags=["health", "safe"])
-    print(store.search("health", limit=3))
+__all__ = ["MemoryEntry", "MemoryStore", "get_memory_store", "find_secret_kind", "MEMORY_TYPES"]

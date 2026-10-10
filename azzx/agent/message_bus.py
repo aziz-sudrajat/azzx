@@ -29,7 +29,7 @@ class MessageEnvelope:
 
 
 class MessageBus:
-    """Lightweight local message bus for Hermes-like agent coordination.
+    """Lightweight local message bus for native agent coordination.
 
     This intentionally avoids heavy dependencies and remains usable on Termux.
     """

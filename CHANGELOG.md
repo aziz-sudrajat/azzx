@@ -1,5 +1,72 @@
 # Changelog
 
+## v10.4.0 — Unified native agent (no separate modes)
+
+**Design correction:** the separate `azzx hermes` mode/product is removed.
+All advanced agent capabilities are now native parts of AZZX's existing
+architecture and normal workflows — one unified agent. `azzx hermes`
+prints a migration table (`hermes think` → `azzx agent`, `hermes memory` →
+`azzx recall`, `hermes trace` → `azzx trace`, `hermes queue` → `azzx queue`,
+`hermes schedule` → `azzx schedule`, `hermes stream` → `azzx ask --stream`).
+Dashboard `/api/hermes/*` renamed to `/api/agent/*`. `HERMES_COMPARISON.md`
+deleted.
+
+### AI orchestration (`azzx/agent/providers.py`)
+- Provider layer extracted from the CLI monolith into a native module
+  (`azzx_cli` re-exports for backwards compatibility).
+- Typed error taxonomy: authentication, rate limit, timeout, malformed
+  response, provider outage, misconfiguration — each with an actionable hint.
+- Bounded retries with exponential backoff + jitter for retryable errors
+  (never infinite); non-retryable errors fail over immediately.
+- Cooperative cancellation via `threading.Event` (between attempts + streaming).
+- `MockAdapter` for deterministic offline tests. API keys never logged.
+
+### Multi-agent (`azzx agent`)
+- Roles planner/researcher/coder/reviewer/tester/security now delegate to the
+  **configured AI provider** — the hardcoded canned responses are gone.
+- Each role has a role prompt, a tool allowlist, and returns a structured
+  result (summary/findings/actions/tool_requests/needs) chained to the next agent.
+- Orchestrator executes allowed tool requests through the permission-enforcing
+  registry; disallowed tools are refused visibly. One follow-up round max.
+- Sequential by default; `--parallel` only for read-only roles; `--fail-fast`;
+  provider failures are reported per agent, never hidden. `azzx agent --roles`.
+
+### Memory (`azzx recall`)
+- Exact-duplicate suppression (content hash); secrets refused at write time
+  (API keys, tokens, private keys, credential assignments) without echoing values.
+- Shared/private boundaries enforced in search; project scoping; importance
+  clamped to [0,1]; validated memory types; schema migration for old DBs.
+- `delete()` removes semantic vectors too; `rebuild` re-embeds from scratch;
+  `stats` reports index health (`verify_index`/`purge_orphan_vectors`).
+
+### Tasks (`azzx queue`) and sessions (`azzx session`)
+- New states: `cancelled`, `interrupted` (owner died — never silently re-run;
+  deliberate `queue resume` after checking side effects).
+- Background tool runs are approval-gated: non-`allow` permissions need `-y`
+  at submit; state files are mode 0600; malformed owners can't crash claims;
+  in-process worker never double-runs a drainer-claimed task; `queue result
+  --wait` refreshes across processes.
+- Sessions: `end` (done/abandoned/failed), `resume` (restores snapshot +
+  events + project context), `stale` (find interrupted sessions).
+
+### Skills (`azzx skills`)
+- Native skill registry: validated `skill.json` (id, semver, input schema,
+  handler, permissions), argument validation, trust-gated lifecycle
+  (install → trust → enable → invoke). Third-party code never runs untrusted.
+- Enabled skills exposed as `skill.<id>` tools through the same permission
+  checks (queue/workflows included). Example: `examples/sample-skill/`.
+
+### Security
+- `deny` is now absolute: `force_yes`/`-y`/workflows/queue can no longer
+  bypass an explicit deny (regression-tested).
+- Tracer redacts secret-looking keys in span attributes/events; trace log is
+  mode 0600. Scheduler state is mode 0600.
+
+### Compatibility
+- `azzx.core.detect_runtime()` probes OS/distro/Termux/systemd/sudo/package
+  manager without assuming any of them exist.
+- `install.sh --check` covers Termux detection (unchanged).
+
 ## v10.3.0 — Queue reliability and persistent tool scheduling
 
 - Fixed task submission race by persisting tasks before workers can consume them.

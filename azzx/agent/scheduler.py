@@ -52,6 +52,10 @@ class ToolScheduler:
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp, self.path)
+            try:
+                os.chmod(self.path, 0o600)  # job args may carry sensitive values
+            except OSError:
+                pass
         finally:
             try:
                 os.unlink(tmp)

@@ -1,6 +1,8 @@
 """Session and project memory journal for AZZX multi-agent workflows.
 
-This keeps Hermes-like continuity across tasks, sessions, and projects.
+Continuity across tasks, sessions, and projects: sessions can be ended,
+resumed (restoring summary + events + project context), and stale
+(interrupted) sessions can be found after a crash or restart.
 Connections are always closed (try/finally) so a failed operation can never
 leave the database locked.
 """
@@ -10,11 +12,13 @@ import json
 import sqlite3
 from contextlib import closing
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from azzx.core import DATA_HOME
+
+SESSION_STATUSES = {"active", "done", "abandoned", "failed"}
 
 
 @dataclass
@@ -183,28 +187,117 @@ class SessionMemoryJournal:
             )
             conn.commit()
 
-    def get_recent_sessions(self, project: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+    def get_recent_sessions(self, project: str | None = None, limit: int = 10,
+                            status: str | None = None) -> list[dict[str, Any]]:
         query = "SELECT * FROM sessions"
+        clauses: list[str] = []
         params: list[Any] = []
         if project:
-            query += " WHERE project = ?"
+            clauses.append("project = ?")
             params.append(project)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY updated_at DESC LIMIT ?"
         params.append(int(limit))
         with closing(self._connect()) as conn:
             rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
-    def get_session_events(self, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
+    def get_session(self, session_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_session_events(self, session_id: str, limit: int = 20,
+                           chronological: bool = False) -> list[dict[str, Any]]:
+        order = "created_at ASC, id ASC" if chronological else "created_at DESC, id DESC"
         with closing(self._connect()) as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT * FROM session_events
                 WHERE session_id = ?
-                ORDER BY created_at DESC LIMIT ?
+                ORDER BY {order} LIMIT ?
                 """,
                 (session_id, int(limit)),
             ).fetchall()
+        return [dict(row) for row in rows]
+
+    def touch_session(self, session_id: str) -> bool:
+        with closing(self._connect()) as conn:
+            cur = conn.execute(
+                "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
+                (self._utcnow(), session_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def end_session(self, session_id: str, status: str = "done",
+                    summary: str = "") -> bool:
+        """Close a session. Status: done | abandoned | failed."""
+        status = (status or "done").strip().lower()
+        if status not in SESSION_STATUSES - {"active"}:
+            raise ValueError(f"Invalid end status {status!r}; use done/abandoned/failed")
+        with closing(self._connect()) as conn:
+            if summary:
+                cur = conn.execute(
+                    "UPDATE sessions SET status = ?, summary = ?, updated_at = ? WHERE session_id = ?",
+                    (status, summary, self._utcnow(), session_id),
+                )
+            else:
+                cur = conn.execute(
+                    "UPDATE sessions SET status = ?, updated_at = ? WHERE session_id = ?",
+                    (status, self._utcnow(), session_id),
+                )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def resume_session(self, session_id: str, event_limit: int = 50) -> dict[str, Any]:
+        """Restore everything needed to continue: snapshot, events, project context."""
+        session = self.get_session(session_id)
+        if session is None:
+            raise KeyError(f"Unknown session: {session_id}")
+        if session.get("status") != "active":
+            # Re-activate explicitly: resuming is a deliberate user action.
+            with closing(self._connect()) as conn:
+                conn.execute(
+                    "UPDATE sessions SET status = 'active', updated_at = ? WHERE session_id = ?",
+                    (self._utcnow(), session_id),
+                )
+                conn.commit()
+            session["status"] = "active"
+        events = self.get_session_events(session_id, limit=event_limit, chronological=True)
+        project = session.get("project") or ""
+        return {
+            "session": session,
+            "events": events,
+            "project_summary": self.build_project_summary(project) if project else "",
+            "hint": (
+                f"Resumed session '{session.get('title')}'. "
+                f"{len(events)} prior event(s) restored; continue from the last state, "
+                "do not repeat completed steps."
+            ),
+        }
+
+    def find_stale(self, project: str | None = None, stale_hours: float = 24.0) -> list[dict[str, Any]]:
+        """Active sessions untouched for longer than `stale_hours`.
+
+        These are candidates for interrupted work: the process likely died
+        before `end_session` was called.
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=stale_hours)).isoformat(timespec="seconds") + "Z"
+        query = "SELECT * FROM sessions WHERE status = 'active' AND updated_at < ?"
+        params: list[Any] = [cutoff]
+        if project:
+            query += " AND project = ?"
+            params.append(project)
+        query += " ORDER BY updated_at ASC"
+        with closing(self._connect()) as conn:
+            rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
     def get_project_memory(self, project: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -248,4 +341,4 @@ def get_session_journal() -> SessionMemoryJournal:
     return _DEFAULT_SESSION_JOURNAL
 
 
-__all__ = ["SessionSnapshot", "SessionMemoryJournal", "get_session_journal"]
+__all__ = ["SessionSnapshot", "SessionMemoryJournal", "get_session_journal", "SESSION_STATUSES"]
