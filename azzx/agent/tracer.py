@@ -1,12 +1,17 @@
-"""Hermes-like observability: execution tracing with spans (v10.2).
+"""Observability: execution tracing with spans (v10.4).
 
 A lightweight, dependency-free tracer. Spans nest naturally via a
 thread-local stack, so tool calls inside agent workflows produce a proper
 timeline: who called what, how long it took, and whether it succeeded.
+
+Secret hygiene: span attributes whose key looks like a credential
+(password, token, api_key, ...) are redacted before they are stored or
+persisted — tool arguments can carry secrets.
 """
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 import uuid
@@ -15,6 +20,24 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from azzx.core import DATA_HOME
+
+_SENSITIVE_KEY_RE = re.compile(
+    r"(password|passwd|pwd|secret|token|api[_-]?key|apikey|auth|credential|private[_-]?key|session[_-]?id)",
+    re.IGNORECASE,
+)
+REDACTED = "***REDACTED***"
+
+
+def redact_sensitive(value: Any) -> Any:
+    """Recursively redact secret-looking keys in span attributes."""
+    if isinstance(value, dict):
+        return {
+            k: (REDACTED if _SENSITIVE_KEY_RE.search(str(k)) else redact_sensitive(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [redact_sensitive(v) for v in value]
+    return value
 
 
 class Span:
@@ -38,11 +61,11 @@ class Span:
         return round((end - self.started_at) * 1000, 2)
 
     def set(self, key: str, value: Any) -> "Span":
-        self.attributes[key] = value
+        self.attributes[key] = redact_sensitive(value)
         return self
 
     def event(self, name: str, **fields: Any) -> "Span":
-        self.events.append({"name": name, "at": time.time(), **fields})
+        self.events.append({"name": name, "at": time.time(), **redact_sensitive(fields)})
         return self
 
     def finish(self, status: str = "ok", error: str | None = None) -> "Span":
@@ -111,8 +134,14 @@ class Tracer:
     def _persist(self, span: Span) -> None:
         try:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            new_file = not self.log_path.exists()
             with open(self.log_path, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(span.to_dict(), ensure_ascii=False) + "\n")
+            if new_file:
+                try:
+                    self.log_path.chmod(0o600)
+                except OSError:
+                    pass
         except OSError:
             pass
 
@@ -187,4 +216,4 @@ def get_tracer() -> Tracer:
     return _TRACER
 
 
-__all__ = ["Span", "Tracer", "get_tracer"]
+__all__ = ["Span", "Tracer", "get_tracer", "redact_sensitive", "REDACTED"]

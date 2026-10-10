@@ -1,4 +1,4 @@
-# AZZATSSINS LITE AGENT (AZZX) v10.3.0
+# AZZATSSINS LITE AGENT (AZZX) v10.4.0
 
 **Terminal-first AI engineering agent** for Termux and Linux.
 
@@ -19,7 +19,7 @@ Tool Registry (deterministic executors)
 OS / workspace / Android device
 ```
 
-[![Version](https://img.shields.io/badge/version-10.3.0-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.4.0-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 
@@ -131,7 +131,7 @@ v10 Universal Agent Layer (AI orchestrator + deterministic tools)
 ### Install from zip
 
 ```bash
-unzip AZZATSSINS_LITE_AGENT_v10.3.0.zip
+unzip AZZATSSINS_LITE_AGENT_v10.4.0.zip
 cd AZZATSSINS_LITE_AGENT_v10.0
 chmod +x *.sh
 ./install.sh --check
@@ -140,7 +140,7 @@ chmod +x *.sh
 
 ```bash
 azzx --version
-# AZZATSSINS LITE AGENT 10.3.0
+# AZZATSSINS LITE AGENT 10.4.0
 ```
 
 ### Installer flags
@@ -971,8 +971,16 @@ Plugins register tools on the shared registry; **execution still uses permission
 
 ```text
 azzx/
-  core.py       # registry, permissions, config
-  agent/        # orchestrator, NL map
+  core.py       # registry, permissions, config, runtime detection
+  agent/        # native agent layer (one unified agent)
+    providers.py    # AI provider adapters, error taxonomy, retries, cancellation
+    multi_agent.py  # planner/researcher/coder/reviewer/tester/security roles
+    memory.py       # SQLite persistent memory, hybrid keyword+semantic search
+    session.py      # session journal: end/resume/stale detection
+    tasks.py        # background task queue (cancel/interrupt/resume)
+    skills.py       # validated, trust-gated native skill registry
+    scheduler.py    # persistent interval scheduler for registered tools
+    reasoning.py tracer.py streaming.py vision.py message_bus.py
   tools/        # v7 toolkit
   workflow/     # v8 workflows
   device/       # adb, mirror, termux
@@ -985,6 +993,8 @@ azzx/
 ## 17. AI providers
 
 Configure with `azzx ai`. Adapters include OpenAI-compatible endpoints, Anthropic, Cohere, and templates such as Gemini, Groq, Qwen (depending on release templates).
+
+The native provider layer (`azzx/agent/providers.py`) classifies failures into typed errors — authentication, rate limit, timeout, malformed response, provider outage, misconfiguration — with actionable hints, retries retryable errors with bounded exponential backoff (never infinite), and supports cooperative cancellation. API keys live in the local vault and are never written to logs or traces.
 
 Example strategy:
 
@@ -1213,6 +1223,21 @@ azzx plugin list
 azzx plugin load
 ```
 
+### Agent (v10.4 — one unified agent)
+
+```bash
+azzx agent "harden the auth module" [--agents planner,reviewer,tester] [--parallel]
+azzx agent --roles
+azzx recall search "deployment notes" [--mode hybrid|keyword|semantic]
+azzx recall add "uses blue-green deploys" --tags deploy
+azzx queue submit sys.health --args '{}' -y
+azzx queue list|status|result|cancel|resume ...
+azzx schedule list|add|remove|run-due
+azzx trace [--limit 20] [--kind tool]
+azzx session start|log|end|resume|list|stale ...
+azzx skills list|find|install|trust|enable|invoke ...
+```
+
 ---
 
 ## 22. Project layout
@@ -1272,29 +1297,101 @@ Avoid: free-form shell from AI/workflows, unsigned remote plugin install, silent
 
 ```bash
 azzx --version
-# AZZATSSINS LITE AGENT 10.3.0
+# AZZATSSINS LITE AGENT 10.4.0
 ```
 
 
 ## v10.3 — Reliability and scheduled tools
 
-The v10.3 release hardens background task persistence and adds an opt-in interval scheduler. Jobs can call **registered AZZX tools only**; they cannot contain shell commands, Python, or arbitrary scripts. The scheduler is intentionally a one-shot runner, so use cron/systemd or invoke it manually.
+The v10.3 release hardened background task persistence and added an opt-in interval scheduler. Jobs can call **registered AZZX tools only**; they cannot contain shell commands, Python, or arbitrary scripts. The scheduler is intentionally a one-shot runner, so use cron/systemd or invoke it manually.
+
+## v10.4 — Unified native agent (no separate modes)
+
+v10.4 removes the separate `azzx hermes` mode. All advanced agent capabilities now live **natively inside AZZX's normal architecture and CLI** — one unified agent:
+
+| Before (v10.2–v10.3) | v10.4 |
+|---|---|
+| `azzx hermes think …` | `azzx agent "…"` (`--agents`, `--parallel`, `--fail-fast`) |
+| `azzx hermes memory …` | `azzx recall search|add|list|delete|rebuild|stats` |
+| `azzx hermes trace` | `azzx trace [--limit N] [--kind K]` |
+| `azzx hermes queue …` | `azzx queue submit|list|status|result|cancel|resume` |
+| `azzx hermes schedule …` | `azzx schedule list|add|remove|run-due` |
+| `azzx hermes stream …` | `azzx ask --stream "…"` |
+
+Running `azzx hermes` now prints this migration table.
+
+### Multi-agent roles (real provider calls)
+
+```bash
+azzx agent --roles
+azzx agent "Review the auth module for security issues" --agents planner,reviewer,security
+```
+
+Six roles — planner, researcher, coder, reviewer, tester, security — each with a role prompt, a tool allowlist, and a structured JSON result passed to the next stage. Every delegation calls the **configured AI provider** (no canned responses); failures are reported visibly. Sequential by default; `--parallel` is only allowed for read-only roles.
+
+### Persistent memory
+
+```bash
+azzx recall add "production uses blue-green deploys" --tags deploy --project web
+azzx recall search "deployment strategy" --mode hybrid
+azzx recall list --project web
+azzx recall delete 42
+azzx recall rebuild   # re-embed the semantic index from scratch
+azzx recall stats
+```
+
+SQLite-backed, Termux-light: keyword + TF-IDF semantic hybrid search, project scoping, shared/private boundaries (an agent always sees its own memories; others' only when shared), exact-duplicate suppression, and refusal to store anything that looks like a secret.
+
+### Background tasks
+
+```bash
+azzx queue submit sys.health --args '{}' -y   # -y pre-approves permission prompts
+azzx queue list --status running
+azzx queue result TASK_ID --wait 30
+azzx queue cancel TASK_ID
+azzx queue resume TASK_ID   # deliberate requeue of interrupted/error/cancelled tasks
+```
+
+A task whose owner died becomes `interrupted` — it is **not** silently re-run (side effects may already have happened). Background runs never prompt: tools whose permissions aren't policy-`allow` need `-y` at submit time. `deny` is absolute and cannot be bypassed by `-y`, workflows, or the queue.
+
+### Sessions
+
+```bash
+azzx session start web "deploy work"     # prints SESSION_ID
+azzx session log SESSION_ID --agent planner --stage plan "decided blue-green"
+azzx session end SESSION_ID --status done --summary "shipped"
+azzx session resume SESSION_ID           # restores summary + events + project context
+azzx session stale --hours 24            # find interrupted sessions
+```
+
+### Skills (native, trust-gated)
+
+```bash
+azzx skills find "uppercase text"
+azzx skills install ./my-skill            # installed untrusted + disabled
+azzx skills trust my-skill && azzx skills enable my-skill
+azzx skills invoke my-skill --args '{"text":"hi"}'
+```
+
+A skill ships a validated `skill.json` (id, version, input schema, handler, permissions) plus a `handler.py`. Arguments are validated against the schema and permissions enforced at execution; third-party code never runs until explicitly trusted. Enabled skills are also callable as `skill.<id>` tools (and from queue/workflows) through the same permission checks. See `examples/sample-skill/`.
+
+### Scheduler
 
 ```bash
 # List schedules
-azzx hermes schedule list
+azzx schedule list
 
 # Run jobs that are due (one pass)
-azzx hermes schedule run-due
+azzx schedule run-due
 
 # Example: run system info every hour (minimum interval: 60 seconds)
-azzx hermes schedule add sys.info --every 3600 --name "hourly system info" --args '{}'
+azzx schedule add sys.info --every 3600 --name "hourly system info" --args '{}'
 
 # Remove a schedule using the ID printed by add/list
-azzx hermes schedule remove JOB_ID
+azzx schedule remove JOB_ID
 ```
 
-For a cron runner, edit your crontab with `crontab -e` and add a line such as `* * * * * /path/to/azzx hermes schedule run-due`. Use the absolute path to the installed `azzx` command.
+For a cron runner, edit your crontab with `crontab -e` and add a line such as `* * * * * /path/to/azzx schedule run-due`. Use the absolute path to the installed `azzx` command.
 
 ### Reliability fixes
 

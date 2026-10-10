@@ -1,4 +1,4 @@
-"""Pure-stdlib semantic embeddings for Hermes-like memory retrieval (v10.2).
+"""Pure-stdlib semantic embeddings for native memory retrieval (v10.2+).
 
 No numpy / ML dependencies — intentionally Termux-friendly. Uses an
 incremental TF-IDF vectorizer with L2-normalized sparse vectors and cosine

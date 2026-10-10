@@ -1,4 +1,4 @@
-"""Hermes-like multimodal support: image input for vision-capable models (v10.2).
+"""Multimodal support: image input for vision-capable models (v10.2+).
 
 Encodes local images as base64 data-URLs in OpenAI-style `content` parts.
 Adapters decide whether the active model supports vision via

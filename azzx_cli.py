@@ -57,7 +57,7 @@ from rich.text import Text
 
 APP_NAME = "AZZATSSINS LITE AGENT"
 APP_SLUG = "azzatssins-lite-agent"
-VERSION = "10.3.0"
+VERSION = "10.4.0"
 
 console = Console(highlight=False)
 
@@ -449,391 +449,36 @@ def status_badge(ok: bool, yes: str = "READY", no: str = "NOT SET") -> str:
     return f"[green]● {yes}[/]" if ok else f"[dim]○ {no}[/]"
 
 
-def normalize_base_url(url: str) -> str:
-    return url.strip().rstrip("/")
+# ---------------------------------------------------------------------------
+# AI provider layer (native module).
+# The canonical implementation lives in azzx.agent.providers so the agent
+# layer can use the configured provider without importing this CLI script.
+# These names are re-exported here for backwards compatibility.
+# ---------------------------------------------------------------------------
+from azzx.agent.providers import (  # noqa: E402
+    AnthropicAdapter,
+    AuthenticationError,
+    BaseAdapter,
+    CancelledError,
+    CohereAdapter,
+    MalformedResponseError,
+    MockAdapter,
+    OpenAICompatibleAdapter,
+    ProviderConfigError,
+    ProviderError,
+    ProviderOutageError,
+    ProviderTimeoutError,
+    RateLimitError,
+    RouteResult,
+    adapter_for,
+    classify_http_error,
+    default_router,
+    extract_text_content,
+    headers_for_provider,
+    normalize_base_url,
+    AIRouter,
+)
 
-
-def headers_for_provider(provider: dict[str, Any], api_key: str) -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    headers.update(provider.get("headers") or {})
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    return headers
-
-
-def extract_text_content(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        parts: list[str] = []
-        for item in value:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text") or item.get("content")
-                if isinstance(text, str):
-                    parts.append(text)
-        return "\n".join(parts)
-    if value is None:
-        return ""
-    return str(value)
-
-
-class BaseAdapter:
-    def __init__(self, provider: dict[str, Any], api_key: str, timeout: float):
-        self.provider = provider
-        self.api_key = api_key
-        self.base_url = normalize_base_url(provider.get("base_url", ""))
-        self.timeout = timeout
-
-    def list_models(self) -> list[str]:
-        raise NotImplementedError
-
-    def chat(self, messages: list[dict[str, str]], model: str) -> str:
-        raise NotImplementedError
-
-    def stream_chat(self, messages: list[dict[str, str]], model: str) -> Any:
-        """Yield text tokens as they arrive. Default: single full chunk."""
-        yield self.chat(messages, model)
-
-    def _raise_http(self, response: httpx.Response) -> None:
-        if response.is_success:
-            return
-        try:
-            body = response.json()
-            if isinstance(body, dict):
-                err = body.get("error")
-                if isinstance(err, dict):
-                    msg = err.get("message") or str(err)
-                else:
-                    msg = body.get("message") or str(body)
-            else:
-                msg = str(body)
-        except Exception:
-            msg = response.text[:800]
-        raise ProviderError(f"HTTP {response.status_code}: {msg}", response.status_code)
-
-
-class OpenAICompatibleAdapter(BaseAdapter):
-    def list_models(self) -> list[str]:
-        if not self.base_url:
-            return []
-        url = f"{self.base_url}/models"
-        headers = headers_for_provider(self.provider, self.api_key)
-        try:
-            with httpx.Client(timeout=min(self.timeout, 30)) as client:
-                response = client.get(url, headers=headers)
-            self._raise_http(response)
-            body = response.json()
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError(str(exc)) from exc
-
-        rows = body.get("data") if isinstance(body, dict) else None
-        if not isinstance(rows, list) and isinstance(body, dict):
-            rows = body.get("models")
-        result: list[str] = []
-        if isinstance(rows, list):
-            for row in rows:
-                if isinstance(row, dict):
-                    mid = row.get("id") or row.get("name")
-                    if mid:
-                        result.append(str(mid))
-                elif isinstance(row, str):
-                    result.append(row)
-        return sorted(set(result), key=str.lower)
-
-    def chat(self, messages: list[dict[str, str]], model: str) -> str:
-        if not self.base_url:
-            raise ProviderError("Base URL belum dikonfigurasi.")
-        if not model:
-            raise ProviderError("Model belum dipilih.")
-        url = f"{self.base_url}/chat/completions"
-        payload: dict[str, Any] = {"model": model, "messages": messages}
-        headers = headers_for_provider(self.provider, self.api_key)
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(url, headers=headers, json=payload)
-            self._raise_http(response)
-            body = response.json()
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError(str(exc)) from exc
-
-        try:
-            choice = body["choices"][0]
-            message = choice.get("message") or {}
-            content = message.get("content")
-            text = extract_text_content(content)
-            if not text and "text" in choice:
-                text = extract_text_content(choice.get("text"))
-            if not text:
-                raise KeyError("empty content")
-            return text
-        except Exception as exc:
-            raise ProviderError(f"Format respons tidak dikenali: {str(body)[:900]}") from exc
-
-    def stream_chat(self, messages: list[dict[str, str]], model: str) -> Any:
-        """SSE token streaming for OpenAI-compatible /chat/completions."""
-        if not self.base_url:
-            raise ProviderError("Base URL belum dikonfigurasi.")
-        if not model:
-            raise ProviderError("Model belum dipilih.")
-        url = f"{self.base_url}/chat/completions"
-        payload: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
-        headers = headers_for_provider(self.provider, self.api_key)
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                with client.stream("POST", url, headers=headers, json=payload) as response:
-                    self._raise_http(response)
-                    for line in response.iter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(data)
-                        except ValueError:
-                            continue
-                        try:
-                            delta = chunk["choices"][0].get("delta") or {}
-                            token = extract_text_content(delta.get("content"))
-                        except (KeyError, IndexError, TypeError):
-                            continue
-                        if token:
-                            yield token
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError(str(exc)) from exc
-
-
-class AnthropicAdapter(BaseAdapter):
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
-            "x-api-key": self.api_key,
-            "anthropic-version": "2023-06-01",
-        }
-
-    def list_models(self) -> list[str]:
-        try:
-            with httpx.Client(timeout=min(self.timeout, 30)) as client:
-                response = client.get(f"{self.base_url}/v1/models", headers=self._headers())
-            self._raise_http(response)
-            rows = response.json().get("data", [])
-            return sorted({str(x.get("id")) for x in rows if isinstance(x, dict) and x.get("id")})
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError(str(exc)) from exc
-
-    def chat(self, messages: list[dict[str, str]], model: str) -> str:
-        system_parts = [m["content"] for m in messages if m.get("role") == "system"]
-        convo = [m for m in messages if m.get("role") in {"user", "assistant"}]
-        payload: dict[str, Any] = {
-            "model": model,
-            "max_tokens": 4096,
-            "messages": convo,
-        }
-        if system_parts:
-            payload["system"] = "\n\n".join(system_parts)
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(f"{self.base_url}/v1/messages", headers=self._headers(), json=payload)
-            self._raise_http(response)
-            body = response.json()
-            content = body.get("content", [])
-            text = extract_text_content(content)
-            if not text:
-                raise KeyError("empty content")
-            return text
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError(str(exc)) from exc
-
-
-class CohereAdapter(BaseAdapter):
-    def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-
-    def list_models(self) -> list[str]:
-        urls = [f"{self.base_url}/v1/models", f"{self.base_url}/v2/models"]
-        last_error: Exception | None = None
-        for url in urls:
-            try:
-                with httpx.Client(timeout=min(self.timeout, 30)) as client:
-                    response = client.get(url, headers=self._headers())
-                if not response.is_success:
-                    last_error = ProviderError(f"HTTP {response.status_code}", response.status_code)
-                    continue
-                body = response.json()
-                rows = body.get("models") or body.get("data") or []
-                models = []
-                for row in rows:
-                    if isinstance(row, dict):
-                        mid = row.get("name") or row.get("id")
-                        if mid:
-                            models.append(str(mid))
-                if models:
-                    return sorted(set(models), key=str.lower)
-            except Exception as exc:
-                last_error = exc
-        if last_error:
-            raise ProviderError(str(last_error))
-        return []
-
-    def chat(self, messages: list[dict[str, str]], model: str) -> str:
-        payload = {"model": model, "messages": messages, "stream": False}
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(f"{self.base_url}/v2/chat", headers=self._headers(), json=payload)
-            self._raise_http(response)
-            body = response.json()
-            message = body.get("message") or {}
-            text = extract_text_content(message.get("content"))
-            if not text:
-                raise KeyError("empty content")
-            return text
-        except ProviderError:
-            raise
-        except Exception as exc:
-            raise ProviderError(str(exc)) from exc
-
-
-def adapter_for(provider: dict[str, Any], api_key: str, timeout: float) -> BaseAdapter:
-    kind = provider.get("kind", "openai")
-    if kind == "anthropic":
-        return AnthropicAdapter(provider, api_key, timeout)
-    if kind == "cohere":
-        return CohereAdapter(provider, api_key, timeout)
-    return OpenAICompatibleAdapter(provider, api_key, timeout)
-
-
-@dataclass
-class RouteResult:
-    text: str
-    provider_id: str
-    provider_name: str
-    model: str
-    key_index: int
-    errors: list[str] = field(default_factory=list)
-
-
-class AIRouter:
-    def __init__(self, cfg: dict[str, Any], providers: dict[str, dict[str, Any]], vault: SecretVault):
-        self.cfg = cfg
-        self.providers = providers
-        self.vault = vault
-
-    def route_order(self, forced_provider: str | None = None) -> list[str]:
-        if forced_provider:
-            return [forced_provider]
-        default = self.cfg.get("default_provider", "")
-        priority = [x for x in self.cfg.get("provider_priority", []) if x in self.providers]
-        order: list[str] = []
-        if default and default in self.providers:
-            order.append(default)
-        for pid in priority:
-            if pid not in order:
-                order.append(pid)
-        if self.cfg.get("fallback_enabled", True):
-            for pid, provider in self.providers.items():
-                if provider.get("enabled", True) and pid not in order:
-                    order.append(pid)
-        return order
-
-    def provider_for_role(self, role: str) -> str | None:
-        if not self.cfg.get("smart_routing", True):
-            return None
-        roles = self.cfg.get("role_providers") or {}
-        pid = str(roles.get(role) or "").strip()
-        return pid if pid in self.providers else None
-
-    def chat_role(self, messages: list[dict[str, str]], role: str, forced_provider: str | None = None) -> RouteResult:
-        return self.chat(messages, forced_provider or self.provider_for_role(role))
-
-    def chat(self, messages: list[dict[str, str]], forced_provider: str | None = None) -> RouteResult:
-        errors: list[str] = []
-        timeout = float(self.cfg.get("timeout_seconds", 120))
-        order = self.route_order(forced_provider)
-        if not order:
-            raise AzzxError("Belum ada AI provider yang dikonfigurasi. Jalankan: azzx ai")
-
-        for pid in order:
-            provider = self.providers.get(pid)
-            if not provider or not provider.get("enabled", True):
-                continue
-            model = str(provider.get("model") or "")
-            key_ids = list(provider.get("key_ids") or [])
-            if not key_ids and not provider.get("requires_key", True):
-                key_ids = [""]
-            if not key_ids:
-                errors.append(f"{pid}: API key belum ada")
-                continue
-
-            for idx, key_id in enumerate(key_ids, 1):
-                api_key = self.vault.get(key_id) if key_id else "ollama"
-                if provider.get("requires_key", True) and not api_key:
-                    errors.append(f"{pid} key#{idx}: key kosong")
-                    continue
-                try:
-                    adapter = adapter_for(provider, api_key, timeout)
-                    text = adapter.chat(messages, model)
-                    return RouteResult(
-                        text=text,
-                        provider_id=pid,
-                        provider_name=provider.get("name", pid),
-                        model=model,
-                        key_index=idx,
-                        errors=errors,
-                    )
-                except ProviderError as exc:
-                    errors.append(f"{provider.get('name', pid)} key#{idx}: {exc}")
-                    continue
-        joined = "\n".join(f"- {e}" for e in errors[-12:])
-        raise AzzxError(f"Semua AI provider gagal.\n{joined}")
-
-    def stream(self, messages: list[dict[str, str]], forced_provider: str | None = None) -> Any:
-        """Yield (provider_id, token) tuples with the same fallback routing as chat()."""
-        errors: list[str] = []
-        timeout = float(self.cfg.get("timeout_seconds", 120))
-        order = self.route_order(forced_provider)
-        if not order:
-            raise AzzxError("Belum ada AI provider yang dikonfigurasi. Jalankan: azzx ai")
-
-        for pid in order:
-            provider = self.providers.get(pid)
-            if not provider or not provider.get("enabled", True):
-                continue
-            model = str(provider.get("model") or "")
-            key_ids = list(provider.get("key_ids") or [])
-            if not key_ids and not provider.get("requires_key", True):
-                key_ids = [""]
-            if not key_ids:
-                errors.append(f"{pid}: API key belum ada")
-                continue
-
-            for idx, key_id in enumerate(key_ids, 1):
-                api_key = self.vault.get(key_id) if key_id else ""
-                if provider.get("requires_key", True) and not api_key:
-                    errors.append(f"{pid} key#{idx}: key kosong")
-                    continue
-                try:
-                    adapter = adapter_for(provider, api_key, timeout)
-                    for token in adapter.stream_chat(messages, model):
-                        yield pid, token
-                    return
-                except ProviderError as exc:
-                    errors.append(f"{provider.get('name', pid)} key#{idx}: {exc}")
-                    continue
-        joined = "\n".join(f"- {e}" for e in errors[-12:])
-        raise AzzxError(f"Semua AI provider gagal.\n{joined}")
 
 
 def choose_from_list(title: str, items: list[tuple[str, str]], allow_cancel: bool = True) -> str | None:
@@ -1837,7 +1482,7 @@ def _build_ask_messages(question: str, context: str, images: list[str], forced_p
 
 
 def run_stream_ask(root: Path, question: str, forced_provider: str | None = None, images: list[str] | None = None) -> int:
-    """Ask AI with token-by-token streaming output (v10.2 Hermes-like)."""
+    """Ask AI with token-by-token streaming output."""  # v10.2+
     cfg = load_config()
     context, selected, files = build_workspace_context(root, question, cfg)
     messages = _build_ask_messages(question, context, images or [], forced_provider)
@@ -4218,21 +3863,21 @@ class _DashboardHandler(__import__('http.server').server.BaseHTTPRequestHandler)
             body=json.dumps({"ok":True,"version":VERSION}).encode(); self._send(200,body,"application/json"); return
         if self.path == "/api/status":
             root=self.root_path; data={"workspace":str(root),"version":VERSION,"tasks":len(list(task_dir(root).glob('*.json'))),"issues":len(list(issue_dir(root).glob('*.json'))),"git":bool(git_root(root)),"roadmap":load_json(roadmap_path(root),{})}; body=json.dumps(data,ensure_ascii=False).encode(); self._send(200,body,"application/json"); return
-        if self.path == "/api/hermes/timeline":
+        if self.path == "/api/agent/timeline":
             try:
                 from azzx.agent.tracer import get_tracer
                 data={"timeline": get_tracer().recent_from_log(50), "stats": get_tracer().stats()}
             except Exception as exc:
                 data={"error": str(exc)}
             body=json.dumps(data,ensure_ascii=False,default=str).encode(); self._send(200,body,"application/json"); return
-        if self.path == "/api/hermes/queue":
+        if self.path == "/api/agent/queue":
             try:
                 from azzx.agent.tasks import get_task_queue
                 data={"tasks": get_task_queue().list_tasks(50)}
             except Exception as exc:
                 data={"error": str(exc)}
             body=json.dumps(data,ensure_ascii=False,default=str).encode(); self._send(200,body,"application/json"); return
-        if self.path.startswith("/api/hermes/memory"):
+        if self.path.startswith("/api/agent/memory"):
             import urllib.parse as _up
             qs=_up.parse_qs(_up.urlparse(self.path).query)
             q=(qs.get("q") or [""])[0]
@@ -5482,12 +5127,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="store_true", help="Show version")
     sub = parser.add_subparsers(dest="command")
 
-    for name in ("ask", "fix", "add", "implement", "agent"):
+    for name in ("ask", "fix", "add", "implement"):
         sp = sub.add_parser(name)
         sp.add_argument("text", nargs="+", help="Instruction/question")
         if name == "ask":
-            sp.add_argument("--stream", action="store_true", help="Stream tokens as they arrive (v10.2)")
+            sp.add_argument("--stream", action="store_true", help="Stream tokens as they arrive")
             sp.add_argument("--image", action="append", default=[], help="Image file for vision-capable models (repeatable)")
+    ag = sub.add_parser(
+        "agent",
+        help="Unified multi-agent run (planner/researcher/coder/reviewer/tester/security) via the configured AI provider",
+    )
+    ag.add_argument("text", nargs="*", help="Task prompt (omit with --roles to list roles)")
+    ag.add_argument("--roles", action="store_true", help="List available agent roles and exit")
+    ag.add_argument("--agents", default="",
+                    help="Comma-separated agent order, e.g. planner,researcher,coder,reviewer,tester,security")
+    ag.add_argument("--parallel", action="store_true",
+                    help="Run in parallel (only allowed for read-only roles)")
+    ag.add_argument("--fail-fast", action="store_true", help="Stop at the first failing agent")
+    ag.add_argument("--project", default="", help="Project scope for memory")
+    ag.add_argument("--session", default="", help="Session journal ID to log into")
+    ag.add_argument("-y", "--yes", action="store_true",
+                    help="Pre-approve tool permission prompts during the run")
     create = sub.add_parser("create", help="Create a new project or scaffold")
     create.add_argument("text", nargs="+", help="Project description")
     create.add_argument("--name", help="Create inside a new child directory")
@@ -5698,52 +5358,123 @@ def build_parser() -> argparse.ArgumentParser:
     mir.add_argument("--dry-run", action="store_true")
     mir.add_argument("-y", "--yes", action="store_true")
 
-    # --- v10.2 Hermes-like agent features ---
-    hm = sub.add_parser("hermes", help="Hermes-like features: multi-agent, memory, tracing, task queue, schedules, streaming")
-    hm_sub = hm.add_subparsers(dest="hermes_action", required=True)
+    # --- v10.4 native agent commands (one unified agent; no separate modes) ---
+    q = sub.add_parser("queue", help="Background task queue")
+    q_sub = q.add_subparsers(dest="queue_action", required=True)
+    qs = q_sub.add_parser("submit", help="Submit a registered tool call to run in background")
+    qs.add_argument("tool")
+    qs.add_argument("--args", default="{}", help="JSON object of arguments")
+    qs.add_argument("-y", "--yes", action="store_true",
+                    help="Pre-approve permission prompts for this task")
+    ql = q_sub.add_parser("list", help="List recent tasks")
+    ql.add_argument("--status", default="",
+                    help="Filter: queued|running|done|error|cancelled|interrupted")
+    qst = q_sub.add_parser("status", help="Show task status")
+    qst.add_argument("task_id")
+    qr = q_sub.add_parser("result", help="Show task result")
+    qr.add_argument("task_id")
+    qr.add_argument("--wait", type=float, default=0, help="Wait up to N seconds for completion")
+    qc = q_sub.add_parser("cancel", help="Cancel a queued task")
+    qc.add_argument("task_id")
+    qre = q_sub.add_parser("resume", help="Requeue an interrupted/error/cancelled task")
+    qre.add_argument("task_id")
 
-    h_think = hm_sub.add_parser("think", help="Multi-agent task with explicit chain-of-thought")
-    h_think.add_argument("prompt", nargs="+")
-    h_think.add_argument("--agents", default="", help="Comma-separated agent order (planner,coder,reviewer,tester,security)")
-    h_think.add_argument("--hide-reasoning", action="store_true")
+    sc = sub.add_parser("schedule", help="Persistent interval schedules for registered tools")
+    sc_sub = sc.add_subparsers(dest="schedule_action", required=True)
+    sc_sub.add_parser("list", help="List scheduled jobs")
+    sca = sc_sub.add_parser("add", help="Schedule a registered tool at a fixed interval")
+    sca.add_argument("tool", help="Registered tool name, e.g. sys.health")
+    sca.add_argument("--args", default="{}", help="JSON object of tool arguments")
+    sca.add_argument("--every", type=int, default=3600, help="Interval in seconds (minimum 60)")
+    sca.add_argument("--name", default="", help="Optional display name")
+    scr = sc_sub.add_parser("remove", help="Remove a schedule by ID")
+    scr.add_argument("job_id")
+    scd = sc_sub.add_parser("run-due", help="Execute due jobs once")
+    scd.add_argument("--limit", type=int, default=20)
 
-    h_mem = hm_sub.add_parser("memory", help="Search persistent memory")
-    h_mem.add_argument("query", nargs="+")
-    h_mem.add_argument("--mode", choices=["keyword", "semantic", "hybrid"], default="hybrid")
-    h_mem.add_argument("--limit", type=int, default=8)
+    rc = sub.add_parser("recall", help="Persistent agent memory (search/add/list/delete/rebuild)")
+    rc_sub = rc.add_subparsers(dest="recall_action", required=True)
+    rcs = rc_sub.add_parser("search", help="Search memory")
+    rcs.add_argument("query", nargs="+")
+    rcs.add_argument("--mode", choices=["keyword", "semantic", "hybrid"], default="hybrid")
+    rcs.add_argument("--limit", type=int, default=8)
+    rcs.add_argument("--project", default="")
+    rcs.add_argument("--agent", default="")
+    rca = rc_sub.add_parser("add", help="Store a memory")
+    rca.add_argument("text", nargs="+")
+    rca.add_argument("--agent", default="user", help="Owning agent id")
+    rca.add_argument("--type", default="fact", help="Memory type")
+    rca.add_argument("--importance", type=float, default=0.7)
+    rca.add_argument("--tags", default="", help="Comma-separated tags")
+    rca.add_argument("--private", action="store_true", help="Not shared with other agents")
+    rca.add_argument("--project", default="", help="Project scope")
+    rcl = rc_sub.add_parser("list", help="Recent memories")
+    rcl.add_argument("--limit", type=int, default=10)
+    rcl.add_argument("--agent", default="")
+    rcl.add_argument("--project", default="")
+    rcd = rc_sub.add_parser("delete", help="Delete a memory by ID")
+    rcd.add_argument("memory_id", type=int)
+    rc_sub.add_parser("rebuild", help="Rebuild the semantic index from scratch")
+    rc_sub.add_parser("stats", help="Memory statistics and index health")
 
-    h_trace = hm_sub.add_parser("trace", help="Show execution timeline")
-    h_trace.add_argument("--limit", type=int, default=20)
-    h_trace.add_argument("--kind", default="", help="Filter by span kind (task, tool, agent, memory)")
+    tr = sub.add_parser("trace", help="Show the execution timeline")
+    tr.add_argument("--limit", type=int, default=20)
+    tr.add_argument("--kind", default="", help="Filter by span kind (task, tool, agent, memory)")
+    tr.add_argument("--clear", action="store_true", help="Clear the persisted timeline")
 
-    h_q = hm_sub.add_parser("queue", help="Background task queue")
-    h_q_sub = h_q.add_subparsers(dest="queue_action", required=True)
-    q_submit = h_q_sub.add_parser("submit", help="Submit a registered tool call to run in background")
-    q_submit.add_argument("tool")
-    q_submit.add_argument("--args", default="{}", help="JSON object of arguments")
-    h_q_sub.add_parser("list", help="List recent tasks")
-    q_status = h_q_sub.add_parser("status", help="Show task status")
-    q_status.add_argument("task_id")
-    q_result = h_q_sub.add_parser("result", help="Show task result")
-    q_result.add_argument("task_id")
-    q_result.add_argument("--wait", type=float, default=0, help="Wait up to N seconds for completion")
+    se = sub.add_parser("session", help="Agent session journal (continuity across runs)")
+    se_sub = se.add_subparsers(dest="session_action", required=True)
+    ses = se_sub.add_parser("start", help="Start a session")
+    ses.add_argument("project")
+    ses.add_argument("title", nargs="*")
+    sel = se_sub.add_parser("log", help="Log an event")
+    sel.add_argument("session_id")
+    sel.add_argument("--agent", default="user")
+    sel.add_argument("--stage", default="note")
+    sel.add_argument("message", nargs="+")
+    see = se_sub.add_parser("end", help="End a session")
+    see.add_argument("session_id")
+    see.add_argument("--status", choices=["done", "abandoned", "failed"], default="done")
+    see.add_argument("--summary", default="")
+    ser = se_sub.add_parser("resume", help="Resume a session (restores context)")
+    ser.add_argument("session_id")
+    seli = se_sub.add_parser("list", help="Recent sessions")
+    seli.add_argument("--project", default="")
+    seli.add_argument("--status", default="")
+    sest = se_sub.add_parser("stale", help="Find interrupted sessions")
+    sest.add_argument("--project", default="")
+    sest.add_argument("--hours", type=float, default=24.0)
 
-    h_schedule = hm_sub.add_parser("schedule", help="Persistent schedules for registered tools (run manually or from cron)")
-    h_schedule_sub = h_schedule.add_subparsers(dest="schedule_action", required=True)
-    h_schedule_sub.add_parser("list", help="List scheduled jobs")
-    h_schedule_add = h_schedule_sub.add_parser("add", help="Schedule a registered tool at a fixed interval")
-    h_schedule_add.add_argument("tool", help="Registered tool name, e.g. sys.health")
-    h_schedule_add.add_argument("--args", default="{}", help="JSON object of tool arguments")
-    h_schedule_add.add_argument("--every", type=int, default=3600, help="Interval in seconds (minimum 60)")
-    h_schedule_add.add_argument("--name", default="", help="Optional display name")
-    h_schedule_rm = h_schedule_sub.add_parser("remove", help="Remove a schedule by ID")
-    h_schedule_rm.add_argument("job_id")
-    h_schedule_due = h_schedule_sub.add_parser("run-due", help="Execute due jobs once")
-    h_schedule_due.add_argument("--limit", type=int, default=20)
+    sk = sub.add_parser("skills", help="Native skill registry (validated, trust-gated)")
+    sk_sub = sk.add_subparsers(dest="skill_action", required=True)
+    sk_sub.add_parser("list", help="List installed skills")
+    skf = sk_sub.add_parser("find", help="Discover skills matching a task")
+    skf.add_argument("query", nargs="+")
+    ski = sk_sub.add_parser("install", help="Install a skill from a directory")
+    ski.add_argument("source")
+    ski.add_argument("--trust", action="store_true",
+                     help="Mark trusted at install time (review the code first!)")
+    sku = sk_sub.add_parser("uninstall", help="Remove a skill")
+    sku.add_argument("skill_id")
+    skt = sk_sub.add_parser("trust", help="Mark a skill trusted")
+    skt.add_argument("skill_id")
+    skut = sk_sub.add_parser("untrust", help="Revoke trust (also disables)")
+    skut.add_argument("skill_id")
+    sken = sk_sub.add_parser("enable", help="Enable a trusted skill")
+    sken.add_argument("skill_id")
+    skdis = sk_sub.add_parser("disable", help="Disable a skill")
+    skdis.add_argument("skill_id")
+    skv = sk_sub.add_parser("invoke", help="Invoke a skill")
+    skv.add_argument("skill_id")
+    skv.add_argument("--args", default="{}", help="JSON object of arguments")
+    skv.add_argument("-y", "--yes", action="store_true")
+    sks = sk_sub.add_parser("show", help="Show a skill manifest")
+    sks.add_argument("skill_id")
 
-    h_stream = hm_sub.add_parser("stream", help="Ask AI with token-by-token streaming")
-    h_stream.add_argument("prompt", nargs="+")
-    h_stream.add_argument("--image", action="append", default=[], help="Image file for vision-capable models (repeatable)")
+    # `azzx hermes` was removed in v10.4 (no separate agent modes).
+    # This shim prints the migration guide instead of failing cryptically.
+    hm = sub.add_parser("hermes", help="REMOVED in v10.4 — prints the migration guide")
+    hm.add_argument("rest", nargs=argparse.REMAINDER, help="Ignored; shows the migration guide")
 
     return parser
 
@@ -5783,7 +5514,7 @@ def main(argv: list[str] | None = None) -> int:
             remote_command(args.host, args.remote_path, args.azzx_args)
             return 0
 
-        ai_commands = {None, "ask", "fix", "add", "implement", "agent", "create", "review", "debug", "autodebug", "architect", "docs", "diagnose", "research", "develop", "review-range", "team", "sandbox", "factory"} | ({"task"} if getattr(args, "action", "") in {"create", "resume"} else set())
+        ai_commands = {None, "ask", "fix", "add", "implement", "create", "review", "debug", "autodebug", "architect", "docs", "diagnose", "research", "develop", "review-range", "team", "sandbox", "factory"} | ({"task"} if getattr(args, "action", "") in {"create", "resume"} else set()) | ({"agent"} if not getattr(args, "roles", False) else set())
         needs_ai = args.command in ai_commands or (args.command == "issue" and getattr(args, "action", "") == "solve") or (args.command == "tests" and getattr(args, "action", "") == "generate") or (args.command == "spec" and getattr(args, "action", "") == "generate") or (args.command == "roadmap" and getattr(args, "action", "") == "generate")
         if needs_ai:
             first_run_wizard()
@@ -5850,7 +5581,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "create":
             create_project(root, " ".join(args.text), args.name, forced)
         elif args.command == "agent":
-            run_multi_agent(root, " ".join(args.text), forced)
+            from azzx.cli_v10 import cmd_agent
+            return cmd_agent(args, root, forced)
         elif args.command == "fix":
             run_edit_task(root, " ".join(args.text), "fix", forced)
         elif args.command == "add":
@@ -6001,8 +5733,26 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run, yes=args.yes,
             )
         elif args.command == "hermes":
-            from azzx.cli_v10 import cmd_hermes
-            return cmd_hermes(args, root, forced)
+            from azzx.cli_v10 import cmd_hermes_migration
+            return cmd_hermes_migration()
+        elif args.command == "queue":
+            from azzx.cli_v10 import cmd_queue
+            return cmd_queue(args)
+        elif args.command == "schedule":
+            from azzx.cli_v10 import cmd_schedule
+            return cmd_schedule(args)
+        elif args.command == "recall":
+            from azzx.cli_v10 import cmd_recall
+            return cmd_recall(args)
+        elif args.command == "trace":
+            from azzx.cli_v10 import cmd_trace
+            return cmd_trace(args)
+        elif args.command == "session":
+            from azzx.cli_v10 import cmd_session
+            return cmd_session(args)
+        elif args.command == "skills":
+            from azzx.cli_v10 import cmd_skills
+            return cmd_skills(args)
 
         return 0
     except AzzxError as exc:

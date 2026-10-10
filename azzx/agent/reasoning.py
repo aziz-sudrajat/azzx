@@ -1,4 +1,4 @@
-"""Hermes-like explicit chain-of-thought reasoning (v10.2).
+"""Explicit reasoning traces for native agent delegation (v10.2+).
 
 Instead of jumping straight to an answer, an agent records its reasoning
 as an ordered trace: thought -> plan -> act -> observe -> reflect ->

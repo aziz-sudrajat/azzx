@@ -26,6 +26,6 @@ jobs:
       - name: Mock AI integration
         env:
           PYTHONPATH: .
-        run: python tests/integration_mock_ai.py
+        run: env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u ALL_PROXY -u all_proxy -u NO_PROXY -u no_proxy python tests/integration_mock_ai.py
       - name: CLI smoke tests
-        run: python azzx_cli.py --version && python azzx_cli.py hermes schedule --help && python azzx_cli.py --help >/dev/null
+        run: python azzx_cli.py --version && python azzx_cli.py schedule --help && python azzx_cli.py agent --roles && python azzx_cli.py recall --help >/dev/null && python azzx_cli.py skills --help >/dev/null

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,7 +22,7 @@ class PermissionDenied(AzzxError):
 
 APP_NAME = "AZZATSSINS LITE AGENT"
 APP_SLUG = "azzatssins-lite-agent"
-VERSION = "10.3.0"
+VERSION = "10.4.0"
 
 CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / APP_SLUG
 DATA_HOME = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_SLUG
@@ -144,10 +146,12 @@ def require_permission(
     force_yes: bool = False,
 ) -> bool:
     policy = permission_policy(capability)
-    if policy == "allow" or force_yes:
-        return True
+    # Deny is absolute: no alternate code path (force_yes, --yes, background
+    # workers, workflows) may bypass an explicit deny.
     if policy == "deny":
         raise PermissionDenied(f"Permission denied by AZZX policy: {capability}")
+    if policy == "allow" or force_yes:
+        return True
     if noninteractive and not force_yes:
         raise PermissionDenied(
             f"Permission requires confirmation: {capability}. "
@@ -171,6 +175,63 @@ def require_permission(
         if ans not in {"y", "yes"}:
             raise PermissionDenied(f"Permission not granted: {capability}")
     return True
+
+
+def detect_runtime() -> dict[str, Any]:
+    """Describe the current runtime environment.
+
+    Used for Termux/Linux compatibility checks and install guidance.
+    Never assumes systemd, sudo, or GNU-specific utilities exist —
+    everything is probed, with graceful fallbacks.
+    """
+    info: dict[str, Any] = {
+        "os": platform.system().lower(),
+        "machine": platform.machine(),
+        "python": platform.python_version(),
+    }
+    prefix = os.environ.get("PREFIX", "")
+    info["termux"] = bool(
+        os.environ.get("TERMUX_VERSION")
+        or prefix.endswith("com.termux/files/usr")
+        or "com.termux" in prefix
+    )
+    # Distro from /etc/os-release (no lsb_release dependency).
+    os_release = Path("/etc/os-release")
+    if os_release.is_file():
+        data: dict[str, str] = {}
+        try:
+            for line in os_release.read_text(encoding="utf-8", errors="replace").splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    data[k.strip()] = v.strip().strip('"')
+        except OSError:
+            pass
+        info["distro_id"] = data.get("ID", "")
+        info["distro_name"] = data.get("PRETTY_NAME", data.get("NAME", ""))
+        info["distro_version"] = data.get("VERSION_ID", "")
+    else:
+        info["distro_id"] = "termux" if info["termux"] else ""
+        info["distro_name"] = "Termux" if info["termux"] else ""
+        info["distro_version"] = os.environ.get("TERMUX_VERSION", "")
+    managers = ("pkg", "apt", "apt-get", "pacman", "dnf", "apk", "zypper")
+    info["package_managers"] = [m for m in managers if shutil.which(m)]
+    info["systemd"] = bool(shutil.which("systemctl") and Path("/run/systemd/system").exists())
+    info["sudo"] = shutil.which("sudo") is not None
+    info["root"] = os.geteuid() == 0 if hasattr(os, "geteuid") else False
+    try:
+        info["cpus"] = os.cpu_count()
+    except OSError:
+        info["cpus"] = None
+    meminfo = Path("/proc/meminfo")
+    if meminfo.is_file():
+        try:
+            for line in meminfo.read_text(encoding="utf-8", errors="replace").splitlines():
+                if line.startswith("MemTotal:"):
+                    info["mem_total_kb"] = int(line.split()[1])
+                    break
+        except (OSError, ValueError, IndexError):
+            pass
+    return info
 
 
 def sanitize_id(name: str, pattern: str = r"[A-Za-z0-9][A-Za-z0-9+._:@-]*") -> str:

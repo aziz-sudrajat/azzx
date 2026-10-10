@@ -1,0 +1,17 @@
+{
+  "id": "shout",
+  "name": "Shout",
+  "description": "Uppercase a phrase (example skill: validated schema, no permissions needed)",
+  "version": "1.0.0",
+  "handler": "handler:main",
+  "permissions": [],
+  "tags": ["example", "text"],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "text": {"type": "string", "description": "Phrase to uppercase", "minLength": 1, "maxLength": 500}
+    },
+    "required": ["text"],
+    "additionalProperties": false
+  }
+}
