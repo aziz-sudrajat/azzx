@@ -412,6 +412,7 @@ def cmd_schedule(args: Any) -> int:
             getattr(args, "tool", ""), tool_args,
             int(getattr(args, "every", 3600)),
             getattr(args, "name", ""),
+            cron=getattr(args, "cron", "") or "",
         )
         _print_json(job)
         return 0
@@ -617,6 +618,11 @@ def cmd_session(args: Any) -> int:
         ))
         return 0
 
+    if action == "search":
+        query = " ".join(getattr(args, "query", []) or []).strip()
+        _print_json(journal.search(query, limit=int(getattr(args, "limit", 20) or 20)))
+        return 0
+
     raise AzzxError("session action not recognized")
 
 
@@ -655,8 +661,10 @@ def cmd_skills(args: Any) -> int:
         return 0
 
     if action == "install":
-        _print_json(reg.install(getattr(args, "source", ""),
-                                trust=bool(getattr(args, "trust", False))))
+        source = getattr(args, "source", "") or ""
+        if source.startswith(("http://", "https://", "git@")):
+            source = _clone_skill_repo(source)
+        _print_json(reg.install(source, trust=bool(getattr(args, "trust", False))))
         return 0
 
     if action == "uninstall":
@@ -692,3 +700,540 @@ def cmd_skills(args: Any) -> int:
         return 0
 
     raise AzzxError("skills action not recognized")
+
+
+def _clone_skill_repo(url: str) -> str:
+    """Shallow-clone a git repo containing a skill; return the local dir.
+
+    If the repo root has no skill.json but exactly one subdirectory does,
+    that subdirectory is used. The clone is temporary; install() copies
+    what it needs into the registry.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path as _Path
+    if not shutil.which("git"):
+        raise AzzxError("git is required to install a skill from URL")
+    tmp = _Path(tempfile.mkdtemp(prefix="azzx-skill-clone-"))
+    try:
+        proc = subprocess.run(
+            ["git", "clone", "--depth", "1", url, str(tmp / "repo")],
+            capture_output=True, text=True, timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        raise AzzxError("git clone timed out")
+    if proc.returncode != 0:
+        raise AzzxError(f"git clone failed: {(proc.stderr or '').strip()[:200]}")
+    repo = tmp / "repo"
+    if (repo / "skill.json").is_file():
+        return str(repo)
+    candidates = [d for d in repo.iterdir() if d.is_dir() and (d / "skill.json").is_file()
+                  and d.name != ".git"]
+    if len(candidates) == 1:
+        return str(candidates[0])
+    raise AzzxError("repo must contain skill.json at root or in exactly one subdirectory")
+
+
+# ---------------------------------------------------------------------------
+# v10.5 — sandbox / planning / learning / checkpoints / autonomy / chat
+# ---------------------------------------------------------------------------
+
+@_guard
+def cmd_exec(args: Any) -> int:
+    """azzx exec run|backends — run a command inside a sandbox."""
+    from azzx.agent.sandbox import get_sandbox_executor, register_sandbox_tools
+    register_sandbox_tools()
+    register_all()
+    action = getattr(args, "exec_action", "run")
+    if action == "backends":
+        _print_json({"backends": get_sandbox_executor().backends()})
+        return 0
+    # run
+    parts = list(getattr(args, "cmdline", "") or "")
+    if parts and parts[0] == "--":
+        parts = parts[1:]
+    command = " ".join(parts).strip()
+    if not command:
+        raise AzzxError("Usage: azzx exec run -- <command>")
+    result = get_sandbox_executor().run(
+        command=command,
+        workdir=getattr(args, "workdir", "") or None,
+        timeout=int(getattr(args, "timeout", 60) or 60),
+        backend=getattr(args, "backend", "auto") or "auto",
+        allow_network=bool(getattr(args, "allow_network", False)),
+    )
+    d = result.to_dict()
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        c = Console()
+        color = "green" if d["ok"] else "red"
+        body = d["stdout"] or "(no stdout)"
+        if d["stderr"]:
+            body += "\n\n[dim]stderr:[/]\n" + d["stderr"]
+        c.print(Panel(body, title=f"sandbox [{d['backend']}] exit={d['exit_code']} [{color}]{'ok' if d['ok'] else 'failed'}[/{color}]",
+                      border_style="cyan"))
+    except Exception:
+        _print_json(d)
+    return 0 if d["ok"] else 1
+
+
+@_guard
+def cmd_plan(args: Any) -> int:
+    """azzx plan "<goal>" [--execute] [-y]."""
+    from azzx.agent.planning import generate_plan, render_plan_text, load_plan
+    goal = " ".join(getattr(args, "text", []) or []).strip()
+    if not goal:
+        raise AzzxError('Usage: azzx plan "<goal>" [--execute]')
+    plan = generate_plan(goal, project_root=getattr(args, "workdir", "") or ".")
+    print(render_plan_text(plan))
+    print(f"\n[dim]saved to {plan.get('path')}[/dim]")
+    if plan.get("needs_clarification"):
+        print("[yellow]The planner has questions — answer them, then re-run with a refined goal.[/yellow]")
+        return 0
+    if getattr(args, "execute", False):
+        from azzx.agent.autonomy import AutonomousRunner
+        runner = AutonomousRunner(
+            workdir=getattr(args, "workdir", "") or ".",
+            auto_approve=bool(getattr(args, "yes", False)),
+        )
+        # Reuse the approved plan file directly.
+        result = _run_plan_file(runner, plan["path"])
+        _print_json(result)
+        return 0 if result.get("status") == "ok" else 1
+    return 0
+
+
+def _run_plan_file(runner: Any, path: str) -> dict[str, Any]:
+    """Execute an already-generated plan file through the autonomy runner."""
+    from azzx.agent import planning
+    plan = planning.load_plan(path)
+    # Drive the runner with the just-generated plan: monkey-patch plan generation.
+    # Approval still goes through the runner (asks unless -y was passed).
+    orig = planning.generate_plan
+    planning.generate_plan = lambda *a, **k: plan  # type: ignore
+    try:
+        return runner.run(plan.get("goal", ""))
+    finally:
+        planning.generate_plan = orig
+
+
+@_guard
+def cmd_learn(args: Any) -> int:
+    """azzx learn list|approve|discard."""
+    from azzx.agent import learning
+    action = getattr(args, "learn_action", "list")
+    if action == "list":
+        _print_json(learning.list_pending())
+        return 0
+    kind = getattr(args, "kind", "")
+    index = int(getattr(args, "index", 0) or 0)
+    if action == "approve":
+        _print_json(learning.approve(kind, index))
+        return 0
+    if action == "discard":
+        _print_json(learning.discard(kind, index))
+        return 0
+    raise AzzxError("learn action not recognized (list|approve|discard)")
+
+
+@_guard
+def cmd_checkpoint(args: Any) -> int:
+    """azzx checkpoint create|list|rollback|prune."""
+    from azzx.agent import checkpoints
+    action = getattr(args, "checkpoint_action", "list")
+    if action == "create":
+        _print_json(checkpoints.create(
+            getattr(args, "workdir", "") or ".",
+            label=getattr(args, "label", "") or ""))
+        return 0
+    if action == "list":
+        _print_json({"checkpoints": checkpoints.list_checkpoints()})
+        return 0
+    if action == "rollback":
+        cid = getattr(args, "checkpoint_id", "")
+        _print_json(checkpoints.rollback(cid, getattr(args, "workdir", "") or None))
+        return 0
+    if action == "prune":
+        _print_json(checkpoints.prune(keep=int(getattr(args, "keep", 20) or 20)))
+        return 0
+    raise AzzxError("checkpoint action not recognized")
+
+
+@_guard
+def cmd_auto(args: Any) -> int:
+    """azzx auto "<goal>" [-y] [--max-steps N] — plan -> approve -> execute -> learn."""
+    from azzx.agent.autonomy import AutonomousRunner
+    goal = " ".join(getattr(args, "text", []) or []).strip()
+    if not goal:
+        raise AzzxError('Usage: azzx auto "<goal>" [-y]')
+    runner = AutonomousRunner(
+        workdir=getattr(args, "workdir", "") or ".",
+        max_steps=int(getattr(args, "max_steps", 25) or 25),
+        auto_approve=bool(getattr(args, "yes", False)),
+        namespace="auto",
+        on_event=_auto_event_printer,
+    )
+    try:
+        result = runner.run(goal)
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+        return 130
+    if result.get("status") == "needs_clarification":
+        print("[yellow]The planner needs clarification before executing:[/yellow]")
+        for q in result.get("questions", []):
+            print(f"  ? {q}")
+        return 2
+    if result.get("status") == "aborted":
+        print("[yellow]Aborted: plan not approved.[/yellow]")
+        return 2
+    _print_json(result)
+    return 0 if result.get("status") == "ok" else 1
+
+
+def _auto_event_printer(event: dict[str, Any]) -> None:
+    kind = event.get("kind")
+    try:
+        if kind == "step_start":
+            s = event.get("step", {})
+            print(f"  ▸ [{s.get('id')}] {s.get('title')}  (tool: {s.get('tool')}, risk: {s.get('risk')})")
+        elif kind == "step_ok":
+            print("    ✓ done")
+        elif kind == "step_failed":
+            print(f"    ✗ failed: {str(event.get('error', ''))[:160]}")
+        elif kind == "checkpoint":
+            print(f"    ◈ checkpoint {event.get('id')}")
+        elif kind == "replanned":
+            print("    ↻ replanned remaining steps")
+    except Exception:
+        pass
+
+
+@_guard
+def cmd_setup(args: Any) -> int:
+    """azzx setup — first-run companion setup (name, language, notes)."""
+    from azzx.agent.companion import get_profile, save_profile
+    existing = get_profile()
+    # Non-interactive flags (scriptable); prompt for whatever is missing.
+    name = (getattr(args, "name", "") or "").strip()
+    language = (getattr(args, "language", "") or "").strip().lower()
+    timezone = (getattr(args, "timezone", "") or "").strip()
+    notes = (getattr(args, "notes", "") or "").strip()
+    if not name or not language:
+        print("AZZX companion setup — ini hanya tersimpan lokal di perangkatmu.\n")
+        try:
+            if not name:
+                name = input(f"Namamu siapa? [{existing.get('name') or ''}]: ").strip() \
+                    or existing.get("name", "")
+            if not language:
+                language = input("Bahasa (id/en) [id]: ").strip().lower() or "id"
+            if not timezone:
+                timezone = input("Zona waktu mis. Asia/Jakarta [kosongkan]: ").strip()
+            if not notes:
+                notes = input("Catatan tentangmu (opsional): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nSetup dibatalkan.")
+            return 130
+    if language not in ("id", "en"):
+        language = "id"
+    if not name:
+        print("Nama wajib diisi agar AZZX bisa menyapamu dengan akrab.")
+        return 2
+    profile = save_profile({"name": name, "language": language,
+                            "timezone": timezone, "notes": notes})
+    print(f"\nSiap! Halo {profile['name']} — AZZX sekarang mengenalmu. Coba: azzx chat")
+    return 0
+
+
+@_guard
+def cmd_chat(args: Any) -> int:
+    """Interactive AZZX chat REPL with slash commands (v10.5)."""
+    from azzx.agent.providers import default_router
+    from azzx.agent.orchestrator import assemble_memory_prompt
+    from azzx.agent.companion import companion_system_prompt
+
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+        from rich.panel import Panel
+        c = Console()
+        use_rich = True
+    except Exception:
+        c = None  # type: ignore
+        use_rich = False
+
+    def out(text: str, style: str = "") -> None:
+        if use_rich:
+            c.print(text, style=style) if style else c.print(text)
+        else:
+            print(text)
+
+    router = default_router()
+    history: list[dict[str, str]] = [
+        {"role": "system", "content": companion_system_prompt()},
+    ]
+    if use_rich:
+        c.print(Panel("AZZX interactive chat — type /help for commands, /quit to exit.",
+                      border_style="cyan"))
+    else:
+        print("AZZX interactive chat — type /help for commands, /quit to exit.")
+
+    while True:
+        try:
+            line = input("azzx> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            out("\nBye.", "dim")
+            return 0
+        if not line:
+            continue
+        if line.startswith("/"):
+            rc = _chat_slash(line, out, use_rich, history)
+            if rc == "quit":
+                out("Bye.", "dim")
+                return 0
+            continue
+        # Plain chat -> provider with memory context, streamed.
+        try:
+            prompt = assemble_memory_prompt(line)
+            messages = history + [{"role": "user", "content": prompt}]
+            buf: list[str] = []
+            for _pid, token in router.stream(messages):
+                buf.append(token)
+                if use_rich:
+                    c.print(token, end="")
+                else:
+                    print(token, end="", flush=True)
+            text = "".join(buf)
+            if use_rich:
+                c.print()
+            else:
+                print()
+            history += [{"role": "user", "content": line}, {"role": "assistant", "content": text}]
+            history = history[-20:]
+        except KeyboardInterrupt:
+            out("\n(interrupted)", "dim")
+        except Exception as exc:
+            out(f"Error: {exc}", "red")
+
+
+def _chat_slash(line: str, out: Any, use_rich: bool, history: list) -> Any:
+    parts = line.split(None, 1)
+    cmd = parts[0].lower()
+    arg = parts[1] if len(parts) > 1 else ""
+
+    if cmd in ("/quit", "/exit", "/q"):
+        return "quit"
+    if cmd == "/help":
+        out("Commands:\n"
+            "  /plan <goal>     generate an execution plan\n"
+            "  /auto <goal>     autonomous run (plan -> approve -> execute -> learn)\n"
+            "  /agent <task>    multi-agent pipeline\n"
+            "  /learn           show staged learnings\n"
+            "  /remember <fakta> simpan fakta/preferensi tentangmu ke memori\n"
+            "  /memory <q>      search persistent memory\n"
+            "  /skills          list skills\n"
+            "  /trace           recent execution timeline\n"
+            "  /clear           clear chat history\n"
+            "  /quit            exit")
+        return None
+    if cmd == "/remember":
+        if not arg:
+            out("Usage: /remember <fakta tentangmu>", "yellow")
+            return None
+        from azzx.agent.companion import remember_fact
+        try:
+            res = remember_fact(arg)
+            out(f"✓ Diingat: {res['stored']}", "green")
+        except Exception as exc:
+            out(f"Tidak disimpan: {exc}", "red")
+        return None
+    if cmd == "/clear":
+        system = history[0] if history and history[0].get("role") == "system" else None
+        history.clear()
+        if system:
+            history.append(system)
+        out("✓ Chat history dibersihkan.", "green")
+        return None
+    if cmd == "/plan":
+        if not arg:
+            out("Usage: /plan <goal>", "yellow")
+            return None
+        from azzx.agent.planning import generate_plan, render_plan_text
+        plan = generate_plan(arg)
+        out(render_plan_text(plan))
+        return None
+    if cmd == "/auto":
+        if not arg:
+            out("Usage: /auto <goal>", "yellow")
+            return None
+        from azzx.agent.autonomy import AutonomousRunner
+        runner = AutonomousRunner(auto_approve=False, on_event=_auto_event_printer)
+        try:
+            result = runner.run(arg)
+        except KeyboardInterrupt:
+            out("\nCancelled.", "dim")
+            return None
+        import json as _json
+        out(_json.dumps(result, indent=2, ensure_ascii=False, default=str)[:3000])
+        return None
+    if cmd == "/agent":
+        if not arg:
+            out("Usage: /agent <task>", "yellow")
+            return None
+        from azzx.agent.multi_agent import MultiAgentOrchestrator
+        result = MultiAgentOrchestrator().run_task(arg)
+        for entry in result.get("results", []):
+            out(f"[{entry.get('agent')}] {entry.get('summary', '')[:400]}")
+        return None
+    if cmd == "/learn":
+        from azzx.agent import learning
+        import json as _json
+        out(_json.dumps(learning.list_pending(), indent=2, ensure_ascii=False)[:3000])
+        out("(use `azzx learn approve|discard <memory|skill> <index>`)", "dim")
+        return None
+    if cmd == "/memory":
+        from azzx.agent.memory import get_memory_store
+        hits = get_memory_store().search_hybrid(query=arg or "", limit=8)
+        for m, s in hits:
+            out(f"[{s:.2f}] {m.content[:160]}")
+        return None
+    if cmd == "/skills":
+        from azzx.agent.skills import get_skill_registry
+        for sk in get_skill_registry().list():
+            out(f"- {sk.get('id')}  trusted={sk.get('trusted')} enabled={sk.get('enabled')}")
+        return None
+    if cmd == "/trace":
+        from azzx.agent.tracer import get_tracer
+        for i in get_tracer().recent_from_log(10):
+            out(f"- {i.get('name', '')} [{i.get('kind')}] {i.get('status', '')}")
+        return None
+    out(f"Unknown command: {cmd}  (try /help)", "yellow")
+    return None
+
+
+@_guard
+def cmd_gateway(args: Any) -> int:
+    """azzx gateway telegram — run the messaging gateway."""
+    import os
+    platform = getattr(args, "gateway_platform", "")
+    if platform != "telegram":
+        raise AzzxError("Only 'telegram' gateway is available in v10.5")
+    from azzx.gateway.telegram import TelegramGateway
+    token = getattr(args, "token", "") or os.environ.get("AZZX_TELEGRAM_TOKEN", "")
+    if not token:
+        raise AzzxError("Bot token required: --token <token> or AZZX_TELEGRAM_TOKEN env")
+    allow_raw = getattr(args, "allow_from", "") or ""
+    allow_from = {int(x) for x in allow_raw.split(",") if x.strip().isdigit()} or None
+    gw = TelegramGateway(token, allow_from=allow_from,
+                         auto_approve=bool(getattr(args, "yes", False)))
+    gw.run_forever()
+    return 0
+
+
+
+@_guard
+def cmd_gui(args: Any) -> int:
+    """azzx gui — friendly ChatGPT-like web chat UI."""
+    from azzx.gui.server import run_gui
+    run_gui(
+        host=getattr(args, "host", "127.0.0.1") or "127.0.0.1",
+        port=int(getattr(args, "port", 8766) or 8766),
+        open_browser=bool(getattr(args, "open", False)),
+    )
+    return 0
+
+
+@_guard
+def cmd_browse(args: Any) -> int:
+    """azzx browse fetch|links — lightweight web reader (no JS rendering)."""
+    from azzx.agent.webreader import fetch
+    action = getattr(args, "browse_action", "fetch")
+    url = getattr(args, "url", "")
+    page = fetch(url)
+    if action == "links":
+        _print_json({"url": page["final_url"], "title": page["title"], "links": page["links"]})
+        return 0
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        c = Console()
+        c.print(Panel(page["text"] or "(no readable text)",
+                      title=f"{page['title'] or page['final_url']}",
+                      subtitle=page["final_url"], border_style="cyan"))
+    except Exception:
+        _print_json({"url": page["final_url"], "title": page["title"], "text": page["text"]})
+    return 0
+
+
+@_guard
+def cmd_connector(args: Any) -> int:
+    """azzx connector setup|list|remove — app connectors (GitHub, email)."""
+    from azzx.agent import connectors as C
+    action = getattr(args, "connector_action", "list")
+    if action == "list":
+        rows = []
+        for name, cfg in C.load_connectors().items():
+            rows.append({"name": name, "type": cfg.get("type"),
+                         "detail": {k: v for k, v in cfg.items()
+                                    if k not in ("type",) and "vault" not in str(v)}})
+        _print_json({"connectors": rows})
+        return 0
+    if action == "setup":
+        name = getattr(args, "name", "")
+        if name == "github":
+            _print_json(C.setup_github())
+        elif name == "email":
+            _print_json(C.setup_email())
+        else:
+            raise AzzxError("available connectors: github, email")
+        return 0
+    if action == "remove":
+        name = getattr(args, "name", "")
+        data = C.load_connectors()
+        if name not in data:
+            raise AzzxError("connector not found")
+        del data[name]
+        C.save_connectors(data)
+        print(f"Connector '{name}' removed (vault secrets kept; delete manually if needed)")
+        return 0
+    raise AzzxError("connector action not recognized")
+
+
+
+
+@_guard
+def cmd_webauto(args: Any) -> int:
+    """azzx webauto "<task>" — autonomous goal-driven browsing (read-only)."""
+    from azzx.agent.webagent import WebAgent
+    task = getattr(args, "task", "")
+    agent = WebAgent(max_steps=int(getattr(args, "max_steps", 12) or 12))
+    result = agent.run(task, start_url=getattr(args, "start_url", None) or None)
+    try:
+        from rich.console import Console
+        from rich.panel import Panel
+        c = Console()
+        status = result.get("status")
+        if status == "answered":
+            c.print(Panel(result["answer"], title="🌐 webauto — jawaban",
+                          subtitle=f"{result['steps']} halaman dikunjungi",
+                          border_style="green"))
+        else:
+            c.print(Panel(f"status: {status}\n"
+                          f"alasan: {result.get('reason', '-')}\n"
+                          f"jejak: {', '.join(result.get('trail', [])[:5])}",
+                          title="🌐 webauto", border_style="yellow"))
+        if getattr(args, "verbose", False):
+            _print_json(result)
+    except Exception:
+        _print_json(result)
+    return 0 if result.get("status") == "answered" else 2
+
+
+@_guard
+def cmd_browse_search(args: Any) -> int:
+    """azzx browse search — web search via DuckDuckGo."""
+    from azzx.agent.webreader import search
+    _print_json({"results": search(getattr(args, "query", ""),
+                                   int(getattr(args, "limit", 8) or 8))})
+    return 0

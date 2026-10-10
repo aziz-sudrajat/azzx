@@ -57,7 +57,7 @@ from rich.text import Text
 
 APP_NAME = "AZZATSSINS LITE AGENT"
 APP_SLUG = "azzatssins-lite-agent"
-VERSION = "10.4.0"
+VERSION = "10.6.0"
 
 console = Console(highlight=False)
 
@@ -1656,6 +1656,24 @@ def doctor(online: bool = False) -> None:
     table.add_row("SSH", "[green]✓[/]" if shutil.which("ssh") else "[yellow]○[/]", shutil.which("ssh") or "optional")
     table.add_row("Config", "[green]✓[/]", str(CONFIG_HOME))
     table.add_row("Vault", "[green]✓[/]", vault.mode)
+    try:
+        _du = shutil.disk_usage(str(Path.home()))
+        _free_gb = _du.free / (1024 ** 3)
+        table.add_row("Disk", "[green]✓[/]" if _free_gb > 0.5 else "[red]✗[/]", f"{_free_gb:.1f} GiB free")
+    except Exception:
+        pass
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as _fh:
+            _mem = {}
+            for _line in _fh:
+                _p = _line.split()
+                if len(_p) >= 2 and _p[0].rstrip(":") in ("MemTotal", "MemAvailable"):
+                    _mem[_p[0].rstrip(":")] = int(_p[1]) // 1024
+        if _mem.get("MemTotal"):
+            table.add_row("Memory", "[green]✓[/]",
+                          f"{_mem.get('MemAvailable', '?')} MiB avail / {_mem['MemTotal']} MiB total")
+    except Exception:
+        pass
     table.add_row("Fallback", "[green]ON[/]" if cfg.get("fallback_enabled") else "[yellow]OFF[/]", " → ".join(cfg.get("provider_priority", [])) or "-")
     console.print(table)
 
@@ -5149,6 +5167,86 @@ def build_parser() -> argparse.ArgumentParser:
     ag.add_argument("--session", default="", help="Session journal ID to log into")
     ag.add_argument("-y", "--yes", action="store_true",
                     help="Pre-approve tool permission prompts during the run")
+    # v10.5 — autonomous agent commands
+    au = sub.add_parser("auto", help="Autonomous run: plan -> approve -> execute -> learn")
+    au.add_argument("text", nargs="*", help="Goal for the autonomous run")
+    au.add_argument("-y", "--yes", action="store_true",
+                    help="Auto-approve the plan and permission prompts (use carefully)")
+    au.add_argument("--max-steps", type=int, default=25, help="Max plan steps to execute")
+    au.add_argument("--workdir", default="", help="Working directory for the run")
+    pl = sub.add_parser("plan", help="Generate an explicit tool-grounded execution plan")
+    pl.add_argument("text", nargs="*", help="Goal to plan for")
+    pl.add_argument("--execute", action="store_true", help="Execute the plan after showing it")
+    pl.add_argument("--workdir", default="", help="Project root for the plan file")
+    pl.add_argument("-y", "--yes", action="store_true", help="Skip approval prompt when executing")
+    ln = sub.add_parser("learn", help="Review learnings distilled by the agent (staged, never silent)")
+    ln_sub = ln.add_subparsers(dest="learn_action")
+    ln_sub.add_parser("list", help="Show staged memory/skill proposals")
+    ln_ap = ln_sub.add_parser("approve", help="Approve a staged proposal")
+    ln_ap.add_argument("kind", choices=["memory", "skill"])
+    ln_ap.add_argument("index", type=int, default=0, help="Index among pending proposals")
+    ln_di = ln_sub.add_parser("discard", help="Discard a staged proposal")
+    ln_di.add_argument("kind", choices=["memory", "skill"])
+    ln_di.add_argument("index", type=int, default=0)
+    cp = sub.add_parser("checkpoint", help="Snapshot/rollback the working directory")
+    cp_sub = cp.add_subparsers(dest="checkpoint_action")
+    cp_cr = cp_sub.add_parser("create", help="Snapshot the working directory")
+    cp_cr.add_argument("--workdir", default="", help="Directory to snapshot (default: cwd)")
+    cp_cr.add_argument("--label", default="", help="Label for the checkpoint")
+    cp_sub.add_parser("list", help="List checkpoints")
+    cp_rb = cp_sub.add_parser("rollback", help="Restore a checkpoint (replaces current files)")
+    cp_rb.add_argument("checkpoint_id", help="Checkpoint ID from list")
+    cp_rb.add_argument("--workdir", default="", help="Target directory (default: original)")
+    cp_pr = cp_sub.add_parser("prune", help="Delete old checkpoints")
+    cp_pr.add_argument("--keep", type=int, default=20)
+    sb = sub.add_parser("exec", help="Run a command inside a sandbox (local/docker backends)")
+    sb_sub = sb.add_subparsers(dest="exec_action")
+    sb_run = sb_sub.add_parser("run", help="Run a command in the sandbox")
+    sb_run.add_argument("cmdline", nargs=argparse.REMAINDER, help="Command (after --)")
+    sb_run.add_argument("--workdir", default="", help="Working dir (default: temp dir)")
+    sb_run.add_argument("--timeout", type=int, default=60)
+    sb_run.add_argument("--backend", default="auto", choices=["auto", "local", "docker"])
+    sb_run.add_argument("--allow-network", action="store_true", help="Docker backend only")
+    sb_sub.add_parser("backends", help="List available sandbox backends")
+    sub.add_parser("chat", help="Interactive AZZX chat with slash commands")
+    sp = sub.add_parser("setup", help="First-run companion setup (your name, language)")
+    sp.add_argument("--name", default="")
+    sp.add_argument("--language", default="", choices=["", "id", "en"])
+    sp.add_argument("--timezone", default="")
+    sp.add_argument("--notes", default="")
+    gp = sub.add_parser("gui", help="Friendly ChatGPT-like web chat UI")
+    gp.add_argument("--host", default="127.0.0.1")
+    gp.add_argument("--port", type=int, default=8766)
+    gp.add_argument("--open", action="store_true", help="Open in browser")
+    br = sub.add_parser("browse", help="Lightweight web reader (fetch text/links, no JS)")
+    br_sub = br.add_subparsers(dest="browse_action")
+    br_f = br_sub.add_parser("fetch", help="Fetch a page as readable text")
+    br_f.add_argument("url")
+    br_l = br_sub.add_parser("links", help="List a page's outbound links")
+    br_l.add_argument("url")
+    br_s = br_sub.add_parser("search", help="Web search (DuckDuckGo)")
+    br_s.add_argument("query")
+    br_s.add_argument("--limit", type=int, default=8)
+    wa = sub.add_parser("webauto", help="Autonomous goal-driven web browsing (read-only)")
+    wa.add_argument("task")
+    wa.add_argument("--start-url", default=None)
+    wa.add_argument("--max-steps", type=int, default=12)
+    wa.add_argument("--verbose", action="store_true")
+    cn = sub.add_parser("connector", help="App connectors (GitHub, email)")
+    cn_sub = cn.add_subparsers(dest="connector_action")
+    cn_sub.add_parser("list", help="List configured connectors")
+    cn_s = cn_sub.add_parser("setup", help="Interactive connector setup")
+    cn_s.add_argument("name", choices=["github", "email"])
+    cn_r = cn_sub.add_parser("remove", help="Remove a connector config")
+    cn_r.add_argument("name")
+    gw = sub.add_parser("gateway", help="Run a messaging gateway (companion on your phone)")
+    gw_sub = gw.add_subparsers(dest="gateway_platform")
+    gw_tg = gw_sub.add_parser("telegram", help="Telegram bot gateway (long-polling)")
+    gw_tg.add_argument("--token", default="", help="Bot token (or AZZX_TELEGRAM_TOKEN env)")
+    gw_tg.add_argument("--allow-from", default="",
+                       help="Comma-separated Telegram chat IDs allowed to use the bot")
+    gw_tg.add_argument("-y", "--yes", action="store_true",
+                       help="Auto-approve /auto plans from Telegram (use carefully)")
     create = sub.add_parser("create", help="Create a new project or scaffold")
     create.add_argument("text", nargs="+", help="Project description")
     create.add_argument("--name", help="Create inside a new child directory")
@@ -5383,10 +5481,11 @@ def build_parser() -> argparse.ArgumentParser:
     sc = sub.add_parser("schedule", help="Persistent interval schedules for registered tools")
     sc_sub = sc.add_subparsers(dest="schedule_action", required=True)
     sc_sub.add_parser("list", help="List scheduled jobs")
-    sca = sc_sub.add_parser("add", help="Schedule a registered tool at a fixed interval")
+    sca = sc_sub.add_parser("add", help="Schedule a registered tool at a fixed interval or cron")
     sca.add_argument("tool", help="Registered tool name, e.g. sys.health")
     sca.add_argument("--args", default="{}", help="JSON object of tool arguments")
     sca.add_argument("--every", type=int, default=3600, help="Interval in seconds (minimum 60)")
+    sca.add_argument("--cron", default="", help='Cron expression, e.g. "*/15 9-17 * * 1-5" (overrides --every)')
     sca.add_argument("--name", default="", help="Optional display name")
     scr = sc_sub.add_parser("remove", help="Remove a schedule by ID")
     scr.add_argument("job_id")
@@ -5445,6 +5544,9 @@ def build_parser() -> argparse.ArgumentParser:
     sest = se_sub.add_parser("stale", help="Find interrupted sessions")
     sest.add_argument("--project", default="")
     sest.add_argument("--hours", type=float, default=24.0)
+    sese = se_sub.add_parser("search", help="Search session titles, summaries and events")
+    sese.add_argument("query", nargs="+")
+    sese.add_argument("--limit", type=int, default=20)
 
     sk = sub.add_parser("skills", help="Native skill registry (validated, trust-gated)")
     sk_sub = sk.add_subparsers(dest="skill_action", required=True)
@@ -5515,7 +5617,7 @@ def main(argv: list[str] | None = None) -> int:
             remote_command(args.host, args.remote_path, args.azzx_args)
             return 0
 
-        ai_commands = {None, "ask", "fix", "add", "implement", "create", "review", "debug", "autodebug", "architect", "docs", "diagnose", "research", "develop", "review-range", "team", "sandbox", "factory"} | ({"task"} if getattr(args, "action", "") in {"create", "resume"} else set()) | ({"agent"} if not getattr(args, "roles", False) else set())
+        ai_commands = {None, "ask", "fix", "add", "implement", "create", "review", "debug", "autodebug", "architect", "docs", "diagnose", "research", "develop", "review-range", "team", "sandbox", "factory", "auto", "plan", "chat"} | ({"task"} if getattr(args, "action", "") in {"create", "resume"} else set()) | ({"agent"} if not getattr(args, "roles", False) else set())
         needs_ai = args.command in ai_commands or (args.command == "issue" and getattr(args, "action", "") == "solve") or (args.command == "tests" and getattr(args, "action", "") == "generate") or (args.command == "spec" and getattr(args, "action", "") == "generate") or (args.command == "roadmap" and getattr(args, "action", "") == "generate")
         if needs_ai:
             first_run_wizard()
@@ -5754,7 +5856,45 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "skills":
             from azzx.cli_v10 import cmd_skills
             return cmd_skills(args)
-
+        elif args.command == "auto":
+            from azzx.cli_v10 import cmd_auto
+            return cmd_auto(args)
+        elif args.command == "plan":
+            from azzx.cli_v10 import cmd_plan
+            return cmd_plan(args)
+        elif args.command == "learn":
+            from azzx.cli_v10 import cmd_learn
+            return cmd_learn(args)
+        elif args.command == "checkpoint":
+            from azzx.cli_v10 import cmd_checkpoint
+            return cmd_checkpoint(args)
+        elif args.command == "exec":
+            from azzx.cli_v10 import cmd_exec
+            return cmd_exec(args)
+        elif args.command == "chat":
+            from azzx.cli_v10 import cmd_chat
+            return cmd_chat(args)
+        elif args.command == "setup":
+            from azzx.cli_v10 import cmd_setup
+            return cmd_setup(args)
+        elif args.command == "gui":
+            from azzx.cli_v10 import cmd_gui
+            return cmd_gui(args)
+        elif args.command == "browse":
+            if getattr(args, "browse_action", None) == "search":
+                from azzx.cli_v10 import cmd_browse_search
+                return cmd_browse_search(args)
+            from azzx.cli_v10 import cmd_browse
+            return cmd_browse(args)
+        elif args.command == "webauto":
+            from azzx.cli_v10 import cmd_webauto
+            return cmd_webauto(args)
+        elif args.command == "connector":
+            from azzx.cli_v10 import cmd_connector
+            return cmd_connector(args)
+        elif args.command == "gateway":
+            from azzx.cli_v10 import cmd_gateway
+            return cmd_gateway(args)
         return 0
     except AzzxError as exc:
         console.print(Panel(str(exc), title="AZZX ERROR", border_style="red"))

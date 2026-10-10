@@ -300,6 +300,37 @@ class SessionMemoryJournal:
             rows = conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Full-text-ish search across session titles, summaries, and events.
+
+        LIKE-based on purpose: works on every SQLite build (including Termux)
+        with no FTS5 dependency.
+        """
+        query = (query or "").strip()
+        if not query:
+            return []
+        like = f"%{query}%"
+        with closing(self._connect()) as conn:
+            session_hits = conn.execute(
+                """SELECT session_id, project, title, summary, status, updated_at
+                   FROM sessions
+                   WHERE title LIKE ? OR summary LIKE ? OR project LIKE ?
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (like, like, like, int(limit)),
+            ).fetchall()
+            event_hits = conn.execute(
+                """SELECT session_id, agent_id, stage,
+                          substr(message, 1, 200) AS snippet, created_at
+                   FROM session_events
+                   WHERE message LIKE ?
+                   ORDER BY created_at DESC LIMIT ?""",
+                (like, int(limit)),
+            ).fetchall()
+        return {
+            "sessions": [dict(r) for r in session_hits],
+            "events": [dict(r) for r in event_hits],
+        }
+
     def get_project_memory(self, project: str, limit: int = 10) -> list[dict[str, Any]]:
         with closing(self._connect()) as conn:
             rows = conn.execute(

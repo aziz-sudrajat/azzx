@@ -66,24 +66,33 @@ class ToolScheduler:
         with self._locked():
             return sorted(self._read(), key=lambda j: float(j.get("next_run", 0)))
 
-    def add(self, tool: str, args: dict[str, Any], every_seconds: int, name: str = "") -> dict[str, Any]:
-        if every_seconds < 60:
-            raise AzzxError("Interval minimum 60 detik untuk mencegah loop yang tidak disengaja.")
+    def add(self, tool: str, args: dict[str, Any], every_seconds: int, name: str = "",
+            cron: str = "") -> dict[str, Any]:
         if not isinstance(args, dict):
             raise AzzxError("Schedule args harus berupa JSON object.")
         # Fail closed: require tool registration and validate schema before saving.
         spec = REGISTRY.get(tool)
         if not spec:
             raise AzzxError(f"Tool tidak dikenal: {tool}")
+        cron = (cron or "").strip()
+        if cron:
+            from azzx.agent.cronutil import next_cron_time
+            next_run = next_cron_time(cron)  # validates the expression
+            every_seconds = 60
+        else:
+            if every_seconds < 60:
+                raise AzzxError("Interval minimum 60 detik untuk mencegah loop yang tidak disengaja.")
+            next_run = time.time() + int(every_seconds)
         job = {
             "id": uuid.uuid4().hex[:10],
             "name": name.strip() or tool,
             "tool": tool,
             "args": args,
             "every_seconds": int(every_seconds),
+            "cron": cron or None,
             "enabled": True,
             "created_at": time.time(),
-            "next_run": time.time() + int(every_seconds),
+            "next_run": next_run,
             "last_run": None,
             "last_status": None,
             "last_error": None,
@@ -125,8 +134,15 @@ class ToolScheduler:
                     reports.append({"id": job["id"], "ok": False, "error": job["last_error"]})
                 job["last_run"] = now
                 # Skip missed intervals rather than stampeding through a backlog.
-                interval = max(60, int(job.get("every_seconds", 60)))
-                job["next_run"] = now + interval
+                if job.get("cron"):
+                    from azzx.agent.cronutil import next_cron_time
+                    try:
+                        job["next_run"] = next_cron_time(str(job["cron"]), after=now)
+                    except Exception:
+                        job["next_run"] = now + 3600
+                else:
+                    interval = max(60, int(job.get("every_seconds", 60)))
+                    job["next_run"] = now + interval
             if due:
                 self._write(jobs)
             return {"due": len(due), "executed": len(reports), "results": reports}
