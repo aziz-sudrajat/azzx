@@ -366,3 +366,55 @@ class AuditFixesTest(unittest.TestCase):
             C.get(res["pre_rollback_checkpoint"])
         finally:
             C.DATA_HOME = orig
+
+
+class SandboxAndroidTest(unittest.TestCase):
+    def test_android_skips_rlimit_as(self):
+        import resource
+        import azzx.agent.sandbox as sbx
+        calls = []
+        real_setrlimit = resource.setrlimit
+        real_is_android = sbx._is_android
+        try:
+            resource.setrlimit = lambda *a: calls.append(a)  # type: ignore
+            sbx._is_android = lambda: True  # type: ignore
+            sbx._posix_limits(10)()
+            kinds = [c[0] for c in calls]
+            self.assertIn(resource.RLIMIT_CPU, kinds)
+            self.assertNotIn(resource.RLIMIT_AS, kinds)
+        finally:
+            resource.setrlimit = real_setrlimit  # type: ignore
+            sbx._is_android = real_is_android  # type: ignore
+
+    def test_desktop_applies_rlimit_as(self):
+        import resource
+        import azzx.agent.sandbox as sbx
+        calls = []
+        real_setrlimit = resource.setrlimit
+        real_is_android = sbx._is_android
+        try:
+            resource.setrlimit = lambda *a: calls.append(a)  # type: ignore
+            sbx._is_android = lambda: False  # type: ignore
+            sbx._posix_limits(10)()
+            kinds = [c[0] for c in calls]
+            self.assertIn(resource.RLIMIT_CPU, kinds)
+            self.assertIn(resource.RLIMIT_AS, kinds)
+        finally:
+            resource.setrlimit = real_setrlimit  # type: ignore
+            sbx._is_android = real_is_android  # type: ignore
+
+    def test_is_android_detection(self):
+        import azzx.agent.sandbox as sbx
+        real_prefix = os.environ.get("PREFIX")
+        real_root = os.environ.get("ANDROID_ROOT")
+        try:
+            os.environ.pop("ANDROID_ROOT", None)
+            os.environ["PREFIX"] = "/data/data/com.termux/files/usr"
+            self.assertTrue(sbx._is_android())
+        finally:
+            if real_prefix is None:
+                os.environ.pop("PREFIX", None)
+            else:
+                os.environ["PREFIX"] = real_prefix
+            if real_root is not None:
+                os.environ["ANDROID_ROOT"] = real_root

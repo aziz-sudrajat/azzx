@@ -21,6 +21,9 @@ modes or competing CLIs):
 - webagent: autonomous goal-driven browsing loop (azzx webauto)
 - connectors: GitHub + email app connectors
 - cronutil: dependency-free cron expression parsing
+- auditor: records every tool call; rule-based + LLM-judge correctness reports
+- compressor: shrink big files (signatures/extractive/head_tail/summarize)
+  before they enter AI context
 - reasoning/tracer/streaming/vision/message_bus: supporting infrastructure
 """
 
@@ -68,6 +71,8 @@ from .webreader import fetch as web_fetch, register_webreader_tools, search as w
 from .webagent import WebAgent
 from .connectors import register_connector_tools
 from .cronutil import describe_cron, next_cron_time, parse_cron
+from .auditor import end_run as audit_end_run, judge as audit_judge, log_custom as audit_log_custom, recent_calls as audit_recent_calls, report as audit_report, start_run as audit_start_run, stats as audit_stats
+from .compressor import compress_context, compress_file, compress_text, estimate_tokens
 from .planning import TodoList, generate_plan, get_todo_list, load_plan, render_plan_text
 from .reasoning import ReasoningTrace, ThoughtStep, STEP_KINDS
 from .sandbox import SandboxExecutor, SandboxResult, get_sandbox_executor

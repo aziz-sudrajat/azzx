@@ -36,11 +36,22 @@ def register_all() -> None:
         from azzx.agent.mcp import register_mcp_tools
         from azzx.agent.webreader import register_webreader_tools
         from azzx.agent.connectors import register_connector_tools
+        from azzx.agent.compressor import compress_text as _compress_text
         register_sandbox_tools()
         register_planning_tools()
         register_mcp_tools()
         register_webreader_tools()
         register_connector_tools()
+        REGISTRY.register(ToolSpec(
+            name="context.compress",
+            description=("Shrink a large text before using it as context "
+                         "(strategies: auto/signatures/extractive/head_tail/summarize)."),
+            permissions=[],
+            handler=lambda text, budget_chars=8000, strategy="auto", query="": _compress_text(
+                text, int(budget_chars), strategy, query),
+            schema={"text": "str (required)", "budget_chars": "int",
+                    "strategy": "str", "query": "str"},
+        ))
     except Exception:  # noqa: BLE001 — agent-native tools must not break boot
         pass
     try:
@@ -90,11 +101,13 @@ def describe_tools_for_ai() -> list[dict[str, Any]]:
 
 
 def run_tool_call(name: str, args: dict[str, Any] | None = None, noninteractive: bool = False, force_yes: bool = False) -> Any:
-    """Execute a registered tool call with permission checks (traced)."""
+    """Execute a registered tool call with permission checks (traced + audited)."""
     register_all()
+    from azzx.agent.auditor import audit_call
     tracer = get_tracer()
     with tracer.span(f"tool:{name}", kind="tool", tool=name, args=args or {}):
-        return REGISTRY.call(name, args or {}, noninteractive=noninteractive, force_yes=force_yes or noninteractive)
+        with audit_call(name, args or {}):
+            return REGISTRY.call(name, args or {}, noninteractive=noninteractive, force_yes=force_yes or noninteractive)
 
 
 def assemble_memory_prompt(user_prompt: str, agent_id: str | None = None, project_context: str = "") -> str:

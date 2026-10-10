@@ -59,6 +59,7 @@ class AutonomousRunner:
         from azzx.agent import planning
         from azzx.agent import checkpoints
         from azzx.agent import learning
+        from azzx.agent import auditor
         from azzx.agent.orchestrator import run_tool_call
         from azzx.agent.tracer import get_tracer
 
@@ -72,8 +73,9 @@ class AutonomousRunner:
         checkpoint_ids: list[str] = []
         started = datetime.now(timezone.utc).isoformat()
 
+        run_id = auditor.start_run(goal)
         with tracer.span("auto.run", kind="task", goal=goal[:120]):
-            self._emit("plan_start", goal=goal)
+            self._emit("plan_start", goal=goal, run_id=run_id)
             plan = planning.generate_plan(
                 goal, context=context, project_root=self.workdir,
                 forced_provider=self.forced_provider,
@@ -82,11 +84,14 @@ class AutonomousRunner:
             self._emit("plan_ready", plan=plan)
 
             if plan.get("needs_clarification") and not self.auto_approve:
+                auditor.end_run("needs_clarification")
                 return {"status": "needs_clarification", "plan": plan,
+                        "run_id": run_id,
                         "questions": plan["needs_clarification"]}
 
             if not self.auto_approve and not self._ask_approve(plan):
-                return {"status": "aborted", "plan": plan,
+                auditor.end_run("aborted")
+                return {"status": "aborted", "plan": plan, "run_id": run_id,
                         "reason": "user did not approve the plan"}
 
             for s in plan.get("steps", []):
@@ -160,9 +165,11 @@ class AutonomousRunner:
                 except Exception as exc:
                     learned = {"error": str(exc)[:200]}
 
+            auditor.end_run(status)
             return {
                 "status": status,
                 "goal": goal,
+                "run_id": run_id,
                 "started_at": started,
                 "finished_at": datetime.now(timezone.utc).isoformat(),
                 "steps_completed": completed,
@@ -171,6 +178,7 @@ class AutonomousRunner:
                 "plan_path": plan.get("path"),
                 "todos": todos.list(),
                 "learned": learned,
+                "audit": f"azzx audit report --run {run_id}",
             }
 
     # -- helpers ---------------------------------------------------------
