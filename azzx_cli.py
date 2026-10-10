@@ -1334,11 +1334,12 @@ def run_edit_task(root: Path, instruction: str, mode: str = "fix", forced_provid
     if selected:
         console.print("[dim]Context:[/] " + ", ".join(str(p.relative_to(root)) for p in selected))
 
+    planner_block = ("PLANNER CONTEXT:\n" + extra_context + "\n\n") if extra_context else ""
     user_payload = f"""
 TASK TYPE: {mode}
 TASK: {instruction}
 
-{("PLANNER CONTEXT:\n" + extra_context + "\n\n") if extra_context else ""}{context}
+{planner_block}{context}
 
 {verb}. Return strict JSON using the required schema.
 """.strip()
