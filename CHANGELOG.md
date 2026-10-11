@@ -1,5 +1,50 @@
 # Changelog
 
+## v10.6.13 — Security hardening + docs (review round 3)
+
+Security audit of the self-modification pipeline:
+
+1. Regex-based code scanner replaced with AST-based `scan_handler`:
+   now catches `getattr(os, 'system')` indirection, `import os as o`
+   aliasing, and `from os import system` — all bypassed the old regex.
+2. NEW `scan_patch`: `evolve approve` now AST-scans ADDED diff lines
+   before applying (previously unscanned — user review was the only gate).
+3. README (EN + ID) now documents `extend`/`evolve` — previously undiscoverable.
+
+
+## v10.6.12 — Bugfix: extend/evolve robustness (review round 2)
+
+Deep review + end-to-end verification found 3 more bugs:
+
+1. Skill IDs with hyphens (e.g. `word-count`) crashed on `skills enable`:
+   `register_skill_tools` registered `skill.word-count` which fails tool
+   name validation. Now sanitized to `skill.word_count` (skill ID unchanged
+   for trust/enable/invoke). Pre-existing bug — affected ALL hyphenated skills.
+2. `evolve propose` crashed on malformed AI output (proposals not a list,
+   non-dict entries, unparseable JSON). Now hardened with type checks.
+3. `evolve approve` crashed if `changes` contained non-dict entries.
+   Now filtered safely.
+
+Verified end-to-end with mocked AI: generate → validate → install
+(untrusted) → trust → enable → invoke all work.
+
+
+## v10.6.11 — Bugfix: self-extension & evolve hardening
+
+Review audit of v10.6.9/v10.6.10 found and fixed 5 bugs:
+
+1. `forced_provider` silently ignored in `extend`, `evolve propose`,
+   and patch generation — now threaded through to the AI router.
+2. JSON extraction regex broke on nested objects — replaced with
+   robust `_extract_json` (fenced block + outermost braces).
+3. `_apply_diff` never verified context/removed lines — a stale AI diff
+   could silently corrupt files. Now raises on any mismatch.
+4. `evolve approve` patched relative to the user's cwd instead of the
+   AZZX installation — now resolves via `azzx_install_root()`.
+5. `input()` confirmation crashed with EOFError in non-interactive
+   mode — now fails safe (patch skipped, hint to use --yes).
+
+
 ## v10.6.10 — Self-improvement loop: `azzx evolve`
 
 AZZX now observes itself, learns user habits, and repairs its own code:

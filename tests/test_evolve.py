@@ -118,8 +118,159 @@ class DiffApplierTest(unittest.TestCase):
             _apply_diff(f, diff)
             self.assertEqual(f.read_text(), "a = 1\nb = 2\n")
 
+    def test_stale_diff_rejected(self):
+        """A diff based on stale content must NOT silently corrupt the file."""
+        import tempfile
+        from pathlib import Path
+        from azzx.agent.evolve import _apply_diff
+        from azzx.core import AzzxError
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "x.py"
+            f.write_text("a = 1\nb = 999\nc = 3\n")  # b changed since diff made
+            diff = (
+                "--- a/x.py\n+++ b/x.py\n"
+                "@@ -1,3 +1,3 @@\n"
+                " a = 1\n"
+                "-b = 2\n"
+                "+b = 20\n"
+                " c = 3\n"
+            )
+            with self.assertRaises(AzzxError):
+                _apply_diff(f, diff)
+            # file untouched
+            self.assertEqual(f.read_text(), "a = 1\nb = 999\nc = 3\n")
 
-class IntentEvolveTest(unittest.TestCase):
+    def test_context_mismatch_rejected(self):
+        import tempfile
+        from pathlib import Path
+        from azzx.agent.evolve import _apply_diff
+        from azzx.core import AzzxError
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "x.py"
+            f.write_text("WRONG\nb = 2\n")
+            diff = (
+                "--- a/x.py\n+++ b/x.py\n"
+                "@@ -1,2 +1,2 @@\n"
+                " a = 1\n"
+                "-b = 2\n"
+                "+b = 20\n"
+            )
+            with self.assertRaises(AzzxError):
+                _apply_diff(f, diff)
+
+
+class ExtractJsonTest(unittest.TestCase):
+    def test_nested_json_in_fence(self):
+        from azzx.agent.selfextend import _extract_json
+        raw = '```json\n{"a": {"b": [1, 2]}, "c": "x"}\n```'
+        import json
+        self.assertEqual(json.loads(_extract_json(raw)), {"a": {"b": [1, 2]}, "c": "x"})
+
+    def test_bare_json(self):
+        from azzx.agent.selfextend import _extract_json
+        import json
+        self.assertEqual(json.loads(_extract_json('{"x": 1}')), {"x": 1})
+
+    def test_no_json_raises(self):
+        from azzx.agent.selfextend import _extract_json
+        from azzx.core import AzzxError
+        with self.assertRaises(AzzxError):
+            _extract_json("no json here")
+
+    def test_install_root(self):
+        from azzx.agent.evolve import azzx_install_root
+        root = azzx_install_root()
+        self.assertTrue((root / "azzx_cli.py").is_file())
+
+
+class MalformedProposeTest(unittest.TestCase):
+    def _mock_router(self, text):
+        from unittest.mock import MagicMock
+        mock_result = MagicMock()
+        mock_result.text = text
+        mock_router = MagicMock()
+        mock_router.chat.return_value = mock_result
+        return mock_router
+
+    def test_proposals_not_list(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            from azzx.agent import evolve as E
+            import azzx.agent.evolve as Em
+            orig = Em.PROPOSALS_FILE
+            Em.PROPOSALS_FILE = Path(td) / "p.json"
+            try:
+                with patch("azzx.agent.providers.default_router",
+                           return_value=self._mock_router('{"proposals": "none"}')):
+                    res = E.propose({"total_calls": 5})
+                self.assertEqual(res["staged"], 0)
+            finally:
+                Em.PROPOSALS_FILE = orig
+
+    def test_proposal_not_dict(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            from azzx.agent import evolve as E
+            import azzx.agent.evolve as Em
+            orig = Em.PROPOSALS_FILE
+            Em.PROPOSALS_FILE = Path(td) / "p.json"
+            try:
+                with patch("azzx.agent.providers.default_router",
+                           return_value=self._mock_router('{"proposals": [42, "x"]}')):
+                    res = E.propose({"total_calls": 5})
+                self.assertEqual(res["staged"], 0)
+            finally:
+                Em.PROPOSALS_FILE = orig
+
+    def test_unparseable_raises_cleanly(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from azzx.core import AzzxError
+        with tempfile.TemporaryDirectory() as td:
+            from azzx.agent import evolve as E
+            import azzx.agent.evolve as Em
+            orig = Em.PROPOSALS_FILE
+            Em.PROPOSALS_FILE = Path(td) / "p.json"
+            try:
+                with patch("azzx.agent.providers.default_router",
+                           return_value=self._mock_router("definitely not json")):
+                    with self.assertRaises(AzzxError):
+                        E.propose({"total_calls": 5})
+            finally:
+                Em.PROPOSALS_FILE = orig
+
+
+class SkillToolNameTest(unittest.TestCase):
+    def test_hyphen_skill_registers(self):
+        """Skills with hyphens in ID must register as tools (sanitized)."""
+        import tempfile
+        from pathlib import Path
+        import json as J
+        from azzx.agent.skills import SkillRegistry, register_skill_tools
+        from azzx.core import REGISTRY
+        with tempfile.TemporaryDirectory() as td:
+            import azzx.agent.skills as S
+            orig_dir = S.SKILL_DIR
+            # Point registry at temp dir via constructor arg
+            reg = SkillRegistry(root=Path(td))
+            skill_dir = Path(td) / "my-skill"
+            skill_dir.mkdir()
+            (skill_dir / "skill.json").write_text(J.dumps({
+                "id": "my-skill", "version": "1.0.0", "handler": "handler:main",
+                "name": "My Skill", "description": "test",
+                "permissions": [], "tags": [],
+                "input_schema": {"type": "object", "properties": {}},
+                "trusted": True, "enabled": True,
+            }))
+            (skill_dir / "handler.py").write_text("def main(**k):\n    return {'ok': True}\n")
+            # Should not raise
+            register_skill_tools(reg)
+            self.assertIn("skill.my_skill", REGISTRY._tools)
     def test_evolve_intent(self):
         from azzx.agent.intent import route
         target, _, _ = route("kembangkan dirimu")

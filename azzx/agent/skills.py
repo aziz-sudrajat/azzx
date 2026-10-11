@@ -388,8 +388,11 @@ def register_skill_tools(registry: SkillRegistry | None = None) -> None:
     for meta in reg.list():
         if meta.get("error") or not meta.get("trusted") or not meta.get("enabled"):
             continue
+        # Tool names can't contain hyphens but skill IDs can; sanitize.
+        # The skill ID itself is unchanged for trust/enable/invoke.
+        tool_name = f"skill.{meta['id']}".replace("-", "_")
         REGISTRY.register(ToolSpec(
-            name=f"skill.{meta['id']}",
+            name=tool_name,
             description=f"[skill v{meta['version']}] {meta['description'] or meta['name']}",
             permissions=list(meta["permissions"]),
             handler=_make_handler(meta["id"]),

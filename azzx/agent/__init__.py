@@ -76,7 +76,7 @@ from .compressor import compress_context, compress_file, compress_text, estimate
 from .attachments import attach_file, resolve_in_root, resolve_mentions, session_attachments
 from .autochain import auto_learn, learn_note, recall_block
 from .webforms import browser_mode, close_session, forms as web_forms, set_browser_mode, submit as web_submit
-from .selfextend import extend_feature, generate_skill, scan_handler
+from .selfextend import extend_feature, generate_skill, scan_handler, scan_patch
 from . import evolve as evolve_engine
 from .planning import TodoList, generate_plan, get_todo_list, load_plan, render_plan_text
 from .reasoning import ReasoningTrace, ThoughtStep, STEP_KINDS

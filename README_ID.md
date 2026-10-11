@@ -15,7 +15,7 @@ azzx auto "rapikan folder download"   # otonom: rencana → setujui → eksekusi
 > **Kebanyakan command?** Mulai dari `azzx do` dan `azzx help`. Semua 93
 > command tetap bisa dipakai — `--help` hanya menampilkan 28 yang paling sering dipakai.
 
-[![Version](https://img.shields.io/badge/version-10.6.10-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.6.13-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 
@@ -121,6 +121,22 @@ azzx gui
 ## 4. Referensi command
 
 Setiap command: fungsi + contoh. `azzx <command> --help` untuk flag lengkap.
+
+### Pengembangan diri (AZZX meng-upgrade dirinya sendiri)
+
+| Command | Fungsi | Contoh |
+|---|---|---|
+| `azzx extend "<permintaan>"` | AI membuat SKILL BARU sesuai permintaan (terinstall untrusted+disabled; review dulu, lalu `azzx skills trust <id>` + `azzx skills enable <id>`) | `azzx extend "buatkan tool hitung kata"` |
+| `azzx evolve analyze` | Pelajari kebiasaanmu: tool tersering, titik kegagalan, pola berulang dari audit trail | `azzx evolve analyze` |
+| `azzx evolve propose` | AI mengubah observasi jadi usulan perbaikan (di-stage, tidak otomatis diterapkan) | `azzx evolve propose` |
+| `azzx evolve proposals` | Review usulan yang di-stage | `azzx evolve proposals` |
+| `azzx evolve approve <id>` | Terapkan usulan: checkpoint → AI buat diff → kamu konfirmasi → syntax check (rollback otomatis jika gagal) | `azzx evolve approve a1b2c3d4` |
+| `azzx evolve reject <id>` | Tolak usulan | `azzx evolve reject a1b2c3d4` |
+
+Keamanan: kode hasil generate di-scan AST untuk pola berbahaya; skill mulai
+dari untrusted+disabled; patch menampilkan diff untuk konfirmasi; file
+terproteksi (`permissions.py`, `auditor.py`, `evolve.py`) tidak bisa disentuh
+tanpa `--force`. AI tidak pernah bisa mengaktifkan kode diam-diam.
 
 ### Companion & chat
 

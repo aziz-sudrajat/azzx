@@ -1504,7 +1504,7 @@ def cmd_do(args: Any, root: Any, forced: Any = None) -> int:
     if target == "extend":
         return cmd_extend(SimpleNamespace(text=[task], dry_run=False), root, forced)
     if target == "evolve":
-        return cmd_evolve(SimpleNamespace(evolve_action="analyze"), root)
+        return cmd_evolve(SimpleNamespace(evolve_action="analyze"), root, forced)
     # fallback: ask
     A.run_ask(root, task or text, forced)
     return 0
@@ -1595,7 +1595,7 @@ def cmd_extend(args: Any, root: Any, forced: Any = None) -> int:
     return 0
 
 
-def cmd_evolve(args: Any, root: Any) -> int:
+def cmd_evolve(args: Any, root: Any, forced: Any = None) -> int:
     """azzx evolve analyze|propose|proposals|approve|reject — self-improvement (v10.6.10)."""
     from azzx.agent import evolve as E
 
@@ -1624,7 +1624,7 @@ def cmd_evolve(args: Any, root: Any) -> int:
     if action == "propose":
         print("→ Menganalisis kebiasaan & meminta AI membuat usulan...")
         try:
-            res = E.propose()
+            res = E.propose(forced_provider=forced)
         except Exception as exc:
             print(f"✗ Gagal: {exc}")
             return 1
@@ -1649,9 +1649,11 @@ def cmd_evolve(args: Any, root: Any) -> int:
     if action == "approve":
         pid = getattr(args, "proposal_id", "")
         try:
+            # NB: no project_root — self-modification targets the AZZX
+            # installation itself (azzx_install_root()), not the user's cwd.
             res = E.approve(pid, force=getattr(args, "force", False),
-                            project_root=root,
-                            auto_yes=getattr(args, "yes", False))
+                            auto_yes=getattr(args, "yes", False),
+                            forced_provider=forced)
         except Exception as exc:
             print(f"✗ Gagal: {exc}")
             return 1

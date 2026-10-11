@@ -15,7 +15,7 @@ azzx auto "organize my downloads folder"   # autonomous: plan → approve → ex
 > **Too many commands?** Start with `azzx do` and `azzx help`. The full set
 > (93 commands) still works — `--help` just shows the 28 you'll use daily.
 
-[![Version](https://img.shields.io/badge/version-10.6.10-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.6.13-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -137,6 +137,22 @@ azzx gui
 
 Every command below shows its purpose and one example. Run `azzx <command> --help`
 for full flags.
+
+### Self-improvement (AZZX upgrades itself)
+
+| Command | What it does | Example |
+|---|---|---|
+| `azzx extend "<request>"` | AI builds a NEW SKILL for the requested feature (installed untrusted+disabled; you review, then `azzx skills trust <id>` + `azzx skills enable <id>`) | `azzx extend "buatkan tool hitung kata"` |
+| `azzx evolve analyze` | Learn your habits: top tools, failure hotspots, repeated patterns from the audit trail | `azzx evolve analyze` |
+| `azzx evolve propose` | AI turns observations into staged improvement proposals (never auto-applied) | `azzx evolve propose` |
+| `azzx evolve proposals` | Review staged proposals | `azzx evolve proposals` |
+| `azzx evolve approve <id>` | Apply a proposal: checkpoint → AI diff → you confirm → syntax check (auto-rollback on failure) | `azzx evolve approve a1b2c3d4` |
+| `azzx evolve reject <id>` | Discard a proposal | `azzx evolve reject a1b2c3d4` |
+
+Safety: generated code is AST-scanned for dangerous patterns; skills start
+untrusted+disabled; patches show a diff for your confirmation; protected
+files (`permissions.py`, `auditor.py`, `evolve.py`) can't be touched without
+`--force`. The AI can never silently activate code — you are always the gate.
 
 ### Companion & chat
 

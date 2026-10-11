@@ -40,6 +40,16 @@ PROTECTED_FILES = frozenset({
     "evolve.py",        # this engine
 })
 
+
+def azzx_install_root() -> Path:
+    """Resolve the AZZX installation directory (where azzx_cli.py lives).
+
+    Self-modification must target AZZX's own code, not the user's
+    current working directory.
+    """
+    import azzx_cli
+    return Path(azzx_cli.__file__).resolve().parent
+
 EVOLVE_SYSTEM = """You are the self-improvement planner for AZZX, a lightweight AI agent.
 Given OBSERVATIONS about how the user uses AZZX (tool usage, failures,
 patterns), propose concrete improvements.
@@ -138,7 +148,8 @@ def analyze() -> dict[str, Any]:
     return findings
 
 
-def propose(findings: dict[str, Any] | None = None) -> dict[str, Any]:
+def propose(findings: dict[str, Any] | None = None,
+           forced_provider: str | None = None) -> dict[str, Any]:
     """Analyze + ask AI for improvement proposals. Stages them (not applied)."""
     from azzx.agent.providers import default_router
 
@@ -151,25 +162,33 @@ def propose(findings: dict[str, Any] | None = None) -> dict[str, Any]:
         raw = router.chat([
             {"role": "system", "content": EVOLVE_SYSTEM},
             {"role": "user", "content": "OBSERVATIONS:\n" + json.dumps(findings, indent=2)},
-        ], max_tokens=3000).text.strip()
+        ], forced_provider, max_tokens=3000).text.strip()
     except Exception as exc:
         raise AzzxError(f"proposal generation needs an AI provider: {exc}")
 
-    import re
-    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-    blob = m.group(1) if m else raw
+    from azzx.agent.selfextend import _extract_json
     try:
+        blob = _extract_json(raw)
         data = json.loads(blob)
-    except Exception:
-        s, e = blob.find("{"), blob.rfind("}")
-        data = json.loads(blob[s:e + 1])
+    except Exception as exc:
+        raise AzzxError(f"proposal output unparseable: {exc}")
+    if not isinstance(data, dict):
+        raise AzzxError("proposal output is not a JSON object")
 
     staged = 0
     items = _load_proposals()
-    for p in data.get("proposals", [])[:5]:
+    proposals = data.get("proposals", [])
+    if not isinstance(proposals, list):
+        proposals = []
+    for p in proposals[:5]:
+        if not isinstance(p, dict):
+            continue
+        changes = p.get("changes", [])
+        if not isinstance(changes, list):
+            changes = []
         # Enforce protected files.
         touched = {str(ch.get("file", "")).split("/")[-1]
-                   for ch in p.get("changes", [])}
+                   for ch in changes if isinstance(ch, dict)}
         if touched & PROTECTED_FILES:
             continue  # silently drop; safety first
         pid = uuid.uuid4().hex[:8]
@@ -178,7 +197,7 @@ def propose(findings: dict[str, Any] | None = None) -> dict[str, Any]:
             "type": str(p.get("type", "habit")),
             "title": str(p.get("title", "untitled"))[:120],
             "description": str(p.get("description", ""))[:1000],
-            "changes": p.get("changes", []),
+            "changes": [c for c in changes if isinstance(c, dict)][:10],
             "risk": str(p.get("risk", "medium")),
             "test": str(p.get("test", ""))[:200],
             "status": "pending",
@@ -216,7 +235,8 @@ Rules:
 """
 
 
-def _generate_patch(file_path: Path, detail: str) -> str:
+def _generate_patch(file_path: Path, detail: str,
+                   forced_provider: str | None = None) -> str:
     """Ask AI to generate a unified diff for file_path implementing detail."""
     from azzx.agent.providers import default_router
 
@@ -227,7 +247,7 @@ def _generate_patch(file_path: Path, detail: str) -> str:
         {"role": "user", "content":
          f"FILE: {file_path.name}\nCHANGE REQUEST: {detail}\n\n"
          f"--- current content ---\n{original[:12000]}"},
-    ], max_tokens=4000).text.strip()
+    ], forced_provider, max_tokens=4000).text.strip()
     import re
     m = re.search(r"```diff\s*(.*?)```", raw, re.DOTALL)
     diff = (m.group(1) if m else raw).strip()
@@ -237,10 +257,14 @@ def _generate_patch(file_path: Path, detail: str) -> str:
 
 
 def _apply_diff(file_path: Path, diff: str) -> None:
-    """Apply a unified diff to file_path (simple single-hunk applier)."""
+    """Apply a unified diff to file_path.
+
+    Verifies every context (' ') and removed ('-') line against the actual
+    file content; raises AzzxError on mismatch instead of silently
+    corrupting the file (e.g. when the AI diff was based on stale content).
+    """
     import re
     lines = diff.splitlines()
-    # Parse hunks: @@ -a,b +c,d @@
     original = file_path.read_text().splitlines(keepends=True)
     out: list[str] = []
     i = 0  # index into original
@@ -254,6 +278,8 @@ def _apply_diff(file_path: Path, diff: str) -> None:
             li += 1
             continue
         start = int(m.group(1)) - 1
+        if start < 0 or start > len(original):
+            raise AzzxError(f"diff hunk starts at invalid line {start + 1}")
         # Copy unchanged lines before this hunk.
         while i < start:
             out.append(original[i])
@@ -262,15 +288,28 @@ def _apply_diff(file_path: Path, diff: str) -> None:
         while li < len(lines) and not lines[li].startswith("@@"):
             ln = lines[li]
             if ln.startswith(" "):
-                if i < len(original):
-                    out.append(original[i])
+                expected = ln[1:]
+                actual = original[i].rstrip("\n") if i < len(original) else None
+                if actual != expected:
+                    raise AzzxError(
+                        f"diff context mismatch at line {i + 1}: "
+                        f"expected {expected!r}, found {actual!r}")
+                out.append(original[i])
                 i += 1
             elif ln.startswith("-"):
+                expected = ln[1:]
+                actual = original[i].rstrip("\n") if i < len(original) else None
+                if actual != expected:
+                    raise AzzxError(
+                        f"diff removal mismatch at line {i + 1}: "
+                        f"expected {expected!r}, found {actual!r}")
                 i += 1  # drop line
             elif ln.startswith("+"):
                 out.append(ln[1:] + "\n")
             elif ln.startswith("\\"):
                 pass  # "\ No newline at end of file"
+            else:
+                raise AzzxError(f"malformed diff line: {ln[:60]!r}")
             li += 1
     while i < len(original):
         out.append(original[i])
@@ -280,7 +319,8 @@ def _apply_diff(file_path: Path, diff: str) -> None:
 
 def approve(proposal_id: str, force: bool = False,
             project_root: str | Path | None = None,
-            auto_yes: bool = False) -> dict[str, Any]:
+            auto_yes: bool = False,
+            forced_provider: str | None = None) -> dict[str, Any]:
     """Apply an approved proposal: checkpoint → AI patch → confirm → test.
 
     Patch changes: AI generates a unified diff, user confirms (unless
@@ -296,25 +336,28 @@ def approve(proposal_id: str, force: bool = False,
         raise AzzxError(f"no pending proposal {proposal_id!r}")
 
     # Self-protection (double-check at apply time).
-    touched = {str(ch.get("file", "")).split("/")[-1]
-               for ch in prop.get("changes", [])}
+    changes = prop.get("changes", [])
+    if not isinstance(changes, list):
+        changes = []
+    changes = [c for c in changes if isinstance(c, dict)]
+    touched = {str(ch.get("file", "")).split("/")[-1] for ch in changes}
     if (touched & PROTECTED_FILES) and not force:
         raise AzzxError(
             f"proposal touches protected files {sorted(touched & PROTECTED_FILES)}; "
             "use --force to override (not recommended)")
 
-    root = Path(project_root or ".").resolve()
+    root = Path(project_root).resolve() if project_root else azzx_install_root()
     # 1. Checkpoint before touching anything.
     cp = checkpoints.create(str(root), label=f"evolve-{proposal_id}")
     cp_id = cp.get("id", "?") if isinstance(cp, dict) else "?"
 
     applied: list[str] = []
     try:
-        for ch in prop.get("changes", []):
+        for ch in changes:
             kind = ch.get("kind", "patch")
             if kind == "skill":
                 from azzx.agent.selfextend import extend_feature
-                res = extend_feature(ch.get("detail", ""))
+                res = extend_feature(ch.get("detail", ""), forced_provider)
                 applied.append(f"skill {res['skill_id']} staged (trust+enable manually)")
             elif kind == "config":
                 applied.append(f"config: {ch.get('detail')} (manual — no auto-apply for configs)")
@@ -325,12 +368,24 @@ def approve(proposal_id: str, force: bool = False,
                     raise AzzxError(f"path escapes project: {rel}")
                 if not fpath.is_file():
                     raise AzzxError(f"file not found: {rel}")
-                diff = _generate_patch(fpath, ch.get("detail", ""))
+                diff = _generate_patch(fpath, ch.get("detail", ""), forced_provider)
                 print(f"\n--- proposed diff for {rel} ---")
                 print(diff[:3000])
                 print("--- end diff ---")
+                # Security scan on ADDED lines (defense in depth; user review
+                # is the primary gate).
+                from azzx.agent.selfextend import scan_patch
+                banned = scan_patch(added)
+                if banned:
+                    raise AzzxError(
+                        f"patch for {rel} contains blocked patterns: "
+                        f"{', '.join(banned)}. Refusing to apply.")
                 if not auto_yes:
-                    ans = input("Terapkan patch ini? [ya/tidak]: ").strip().lower()
+                    try:
+                        ans = input("Terapkan patch ini? [ya/tidak]: ").strip().lower()
+                    except EOFError:
+                        applied.append(f"patch {rel}: DIBATALKAN (non-interaktif, pakai --yes)")
+                        continue
                     if ans not in ("ya", "y", "yes"):
                         applied.append(f"patch {rel}: DIBATALKAN oleh user")
                         continue
