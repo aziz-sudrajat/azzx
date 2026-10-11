@@ -62,3 +62,44 @@ repo `github.com/NousResearch/hermes-agent`, riset 2026-10-10.
 **Prinsip v10.5:** tiru yang memperkuat AZZX sebagai *agen*, bukan yang
 menambah *permukaan produk*. Setiap fitur baru wajib: (1) tanpa dep berat
 baru, (2) lolos deny-first, (3) ada test.
+
+---
+
+## 5. Update v10.6.2/v10.6.3 (2026-10-11) — hasil testing di mesin + perbandingan ulang
+
+### Yang baru di AZZX
+
+| # | Fitur | Status vs Hermes | Catatan jujur |
+|---|---|---|---|
+| 26 | Auditor agent (`azzx audit list/stats/report --judge`) | **Diferensiasi AZZX** | Hermes punya trajectory export (untuk training), learning timeline, dan auditing enterprise. AZZX: setiap tool call terekam (argumen di-redact, durasi, hasil); laporan berbasis **aturan objektif** (kegagalan berulang, denial, tool berisiko, timeout) + skor 0-100; `--judge` memakai LLM sebagai juri. Relevan: kritik Tech Times bahwa skill-loop Hermes bias memuji diri sendiri (*self-congratulation bias*) — auditor AZZX menilai dengan aturan dulu, bukan penilaian diri sendiri |
+| 27 | Token compressor (`azzx compress`, dipakai otomatis oleh `azzx ask`) | **Pendekatan berbeda, kompetitif** | Hermes memakai auxiliary model slot untuk kompresi konteks (bayar token untuk hemat token). AZZX: `signatures` via AST Python (hemat 70-90%, gratis, tanpa token), `extractive` fokus-query, `head_tail`, `summarize` (LLM, opsional) |
+| 28 | GUI web chat (`azzx gui`) | Mengejar, belum setara | Hermes: desktop app + dashboard Models/sessions. AZZX: single-file web UI (stdlib saja), SSE streaming. Cukup untuk companion, bukan IDE |
+| 29 | Konektor GitHub + Email IMAP/SMTP | Mengejar, jauh | Hermes: katalog MCP + 30+ platform messaging + plugin. AZZX: 2 konektor. Google Drive ditunda (butuh OAuth2 app manual) |
+| 30 | `webauto` (browse otonom read-only) | Mengejar, belum setara | Hermes: browser automation penuh (navigate/snapshot/vision, multi-backend). AZZX: fetch/search + loop search→read→decide, read-only, SSRF guard. Playwright penuh ditunda (300MB+, lawan target kentang) |
+| 31 | Fix sandbox Android (RLIMIT_AS → SIGABRT) | **Unggul di Termux** | Ditemukan via testing di Termux: cap address-space 512MB membuat Bionic abort semua proses. Sekarang dilewati di Android. Hermes juga dukung Termux, tapi fiks semacam ini menunjukkan perhatian AZZX ke platform lemah |
+
+### Hasil testing AZZX v10.6.3 di mesin (2026-10-11)
+
+- 182–183 unit test lolos di Python 3.10/3.11/3.12/3.14; selftest 7/7
+- Fungsional: `compress` (8.975→1.539 chars), `audit` end-to-end, `exec run`,
+  `checkpoint`, `plan`, GUI (HTTP 200), permission deny — semua OK
+- Bug ditemukan & diperbaiki saat testing: klasifikasi denial di auditor
+  (`PermissionDenied` terdeteksi sebagai `error`, bukan `denied`)
+- `browse search` gagal di VM ini karena egress proxy meng-intercept TLS
+  (environmental, bukan bug kode)
+
+### Skor jujur per kategori (update)
+
+| Kategori | Hermes | AZZX v10.6.3 |
+|---|---|---|
+| Jumlah built-in tools | ✅ 60+ | ~45 (mengejar) |
+| Messaging gateway | ✅ 30+ platform | 1 (Telegram) |
+| Browser automation | ✅ penuh + vision | Read-only |
+| Voice | ✅ | ❌ |
+| Learning loop | ✅ auto-create skills | Staged/trust-gated (lebih aman, kurang otonom) |
+| **Auditability kerja agen** | Trajectory + enterprise | ✅ **Rule-based + LLM judge per run** |
+| **Kompresi konteks** | Auxiliary model (bayar) | ✅ **AST gratis** |
+| **Ringan (kentang/Termux)** | Bootstrap Python 3.14+Node+FFmpeg | ✅ **httpx+rich saja** |
+| Permission model | Smart approvals | ✅ Deny-first absolut |
+| Multi-agent | ✅ Bot Mode, MoA, A2A | Roles + queue (sederhana) |
+| Ekosistem | ✅ 252k stars | Solo project |

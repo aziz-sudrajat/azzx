@@ -33,10 +33,6 @@ class AgentStream:
         self.events.append(event)
         return event
 
-    def iter_events(self) -> Iterator[StreamEvent]:
-        for event in self.events:
-            yield event
-
     def as_dicts(self) -> list[dict[str, Any]]:
         return [event.to_dict() for event in self.events]
 

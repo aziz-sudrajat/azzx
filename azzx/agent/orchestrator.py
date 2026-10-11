@@ -36,11 +36,13 @@ def register_all() -> None:
         from azzx.agent.mcp import register_mcp_tools
         from azzx.agent.webreader import register_webreader_tools
         from azzx.agent.connectors import register_connector_tools
+        from azzx.agent.webforms import register_webform_tools
         from azzx.agent.compressor import compress_text as _compress_text
         register_sandbox_tools()
         register_planning_tools()
         register_mcp_tools()
         register_webreader_tools()
+        register_webform_tools()
         register_connector_tools()
         REGISTRY.register(ToolSpec(
             name="context.compress",

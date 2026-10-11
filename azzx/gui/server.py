@@ -171,28 +171,39 @@ class GUIHandler(BaseHTTPRequestHandler):
             pass
 
 
+def _with_attachments(message: str) -> str:
+    """Append @file mention contents (v10.6.4). Root = server working dir."""
+    from pathlib import Path
+    from azzx.agent.orchestrator import assemble_memory_prompt
+    from azzx.agent import attachments as AT
+
+    message, mention_ctx = AT.resolve_mentions(message, Path.cwd())
+    prompt = assemble_memory_prompt(message)
+    if mention_ctx:
+        prompt = prompt + "\n" + mention_ctx
+    return prompt
+
+
 def _chat_once(message: str) -> str:
     from azzx.agent.companion import companion_system_prompt
-    from azzx.agent.orchestrator import assemble_memory_prompt
     from azzx.agent.providers import default_router
 
     router = default_router()
     messages = [
         {"role": "system", "content": companion_system_prompt()},
-        {"role": "user", "content": assemble_memory_prompt(message)},
+        {"role": "user", "content": _with_attachments(message)},
     ]
     return router.chat(messages, max_tokens=1000).text.strip()
 
 
 def _chat_stream(message: str):
     from azzx.agent.companion import companion_system_prompt
-    from azzx.agent.orchestrator import assemble_memory_prompt
     from azzx.agent.providers import default_router
 
     router = default_router()
     messages = [
         {"role": "system", "content": companion_system_prompt()},
-        {"role": "user", "content": assemble_memory_prompt(message)},
+        {"role": "user", "content": _with_attachments(message)},
     ]
     for _pid, token in router.stream(messages):
         yield token

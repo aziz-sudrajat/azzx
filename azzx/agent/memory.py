@@ -424,18 +424,6 @@ class MemoryStore:
         return {"entries": int(entries), "vectors": int(vectors),
                 "orphan_vectors": int(orphans), "healthy": orphans == 0 and vectors <= entries}
 
-    def purge_orphan_vectors(self) -> int:
-        with closing(self._connect()) as conn:
-            cur = conn.execute(
-                "DELETE FROM memory_vectors WHERE memory_id NOT IN (SELECT id FROM memory_entries)"
-            )
-            conn.commit()
-            return int(cur.rowcount)
-
-    def get_agent_summary(self, agent_id: str, limit: int = 5) -> list[dict[str, Any]]:
-        return [e.to_dict() for e in self.get_recent(agent_id=agent_id, limit=limit,
-                                                     include_private=True)]
-
     def get_stats(self) -> dict[str, Any]:
         with closing(self._connect()) as conn:
             row = conn.execute(

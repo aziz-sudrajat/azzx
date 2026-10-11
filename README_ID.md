@@ -1,4 +1,4 @@
-# AZZX v10.6.3 — Sahabat AI Pribadimu
+# AZZX v10.6.7 — Sahabat AI Pribadimu
 
 **Satu AI agent terpadu untuk terminal.** Ngobrol dengannya seperti teman, biarkan
 dia merencanakan dan mengeksekusi tugas secara mandiri, dan jalankan di mana saja —
@@ -7,11 +7,15 @@ dari PC kentang sampai HP Android dengan Termux.
 ```bash
 bash install.sh                 # install ke ~/.local/share + perintah `azzx`
 azzx setup                      # kenalkan namamu (tersimpan lokal, privat)
+azzx do "perbaiki bug login"    # cukup jelaskan maunya apa — AZZX yang routing
 azzx chat                       # ngobrol dengan companion
 azzx auto "rapikan folder download"   # otonom: rencana → setujui → eksekusi → belajar
 ```
 
-[![Version](https://img.shields.io/badge/version-10.6.3-cyan)](./VERSION)
+> **Kebanyakan command?** Mulai dari `azzx do` dan `azzx help`. Semua 93
+> command tetap bisa dipakai — `--help` hanya menampilkan 28 yang paling sering dipakai.
+
+[![Version](https://img.shields.io/badge/version-10.6.7-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 
@@ -79,6 +83,12 @@ Konfigurasi AI provider (OpenAI-compatible, Anthropic, Cohere, atau Ollama lokal
 azzx ai         # setup provider interaktif (key masuk ke vault aman)
 ```
 
+**LLM lokal (tanpa cloud):** install [Ollama](https://ollama.com),
+pull model (`ollama pull qwen2.5-coder:7b`), lalu `azzx ai` → pilih
+**Ollama** — tanpa API key, semua jalan di mesinmu sendiri.
+Server lokal lain yang kompatibel OpenAI juga bisa via opsi **Custom**
+(mis. `http://127.0.0.1:1234/v1` untuk LM Studio).
+
 > Belum punya provider? Command yang tidak butuh AI (`exec`, `checkpoint`,
 > `schedule`, `doctor`, …) tetap jalan offline.
 
@@ -122,7 +132,13 @@ Setiap command: fungsi + contoh. `azzx <command> --help` untuk flag lengkap.
 | `azzx gateway telegram` | Jalankan AZZX sebagai bot Telegram di HP | `azzx gateway telegram --token $TG --allow-from 123456` |
 
 Slash command di `azzx chat`: `/plan`, `/auto`, `/agent`, `/learn`,
-`/remember <fakta>`, `/memory <q>`, `/skills`, `/trace`, `/clear`, `/quit`.
+`/remember <fakta>`, `/memory <q>`, `/skills`, `/trace`, `/clear`, `/quit`,
+`/add <file>`, `/added`, `/unadd <file>`.
+
+**Biarkan AI membaca file-mu:** tulis `@path/ke/file` di pesan chat atau GUI
+(mis. `analisa @main.py`), atau `/add main.py` agar file tetap ter-attach
+selama sesi. File besar dikompres otomatis. Path harus di dalam workspace —
+`@../secret` ditolak.
 
 ### Agent otonom
 
@@ -243,9 +259,14 @@ Agent juga bisa memanggil tool MCP sendiri via tool registry `mcp.call`
 | Command | Fungsi | Contoh |
 |---|---|---|
 | `azzx ask "<q>"` | Tanya AI tentang projectmu | `azzx ask "di mana bug login?"` |
-| `azzx fix "<deskripsi>"` | Perbaiki kode via AI | `azzx fix "null pointer di handler"` |
+| `azzx fix "<deskripsi>"` | Perbaiki kode via AI — otomatis recall memori relevan, otomatis distill learning setelahnya | `azzx fix "null pointer di handler"` |
 | `azzx add "<deskripsi>"` | Implementasikan fitur | `azzx add "tambah retry ke client"` |
-| `azzx review` | Review kode statis | `azzx review --focus security` |
+| `azzx review` | Review kode statis — otomatis recall memori relevan, otomatis distill learning setelahnya | `azzx review --focus security` |
+
+> **Auto-chaining:** `fix`, `add`, `implement`, dan `review` otomatis saling
+> memanggil — memori di-recall sebelum AI jalan, learning di-distill
+> (staged, tidak pernah auto-approve) setelahnya. Opt-out per run:
+> `--no-recall`, `--no-learn`.
 | `azzx test` | Jalankan test | `azzx test` |
 | `azzx debug <cmd>` | Jalankan + diagnosa perintah gagal | `azzx debug "python3 main.py"` |
 | `azzx autodebug <cmd>` | Loop: run → fix → run | `azzx autodebug "pytest -x"` |
@@ -261,7 +282,11 @@ Agent juga bisa memanggil tool MCP sendiri via tool registry `mcp.call`
 
 | Command | Fungsi | Contoh |
 |---|---|---|
-| `azzx webauto "<tugas>"` | **Browsing yang solve sendiri:** cari, buka halaman, ikuti link sampai bisa menjawab (read-only) | `azzx webauto "berapa harga kopi robusta hari ini"` |
+| `azzx webauto "<tugas>"` | **Browsing yang solve sendiri:** cari, buka halaman, ikuti link sampai bisa menjawab | `azzx webauto "berapa harga kopi robusta hari ini"` |
+| `azzx webauto "<tugas>" --write` | Sama, tapi agent boleh submit form HTML untuk menyelesaikan tugas (butuh write mode) | `azzx webauto "cari form kontak" --write -y` |
+| `azzx browse mode [read\|write]` | Mode browser: `read` (default, lihat saja) atau `write` (boleh submit form) | `azzx browse mode write` |
+| `azzx browse forms <url>` | Daftar form HTML di halaman (read-only) | `azzx browse forms https://example.com` |
+| `azzx browse submit <url>` | Isi + submit form (`--form N --field k=v`, butuh write mode) | `azzx browse submit https://example.com --form 0 --field q=kopi` |
 | `azzx browse search "<q>"` | Cari di web (DuckDuckGo) | `azzx browse search "harga kopi"` |
 | `azzx browse fetch <url>` | Ambil halaman sebagai teks bersih (tanpa JS) | `azzx browse fetch https://example.com` |
 | `azzx browse links <url>` | Daftar link keluar dari halaman | `azzx browse links https://example.com` |
@@ -269,8 +294,10 @@ Agent juga bisa memanggil tool MCP sendiri via tool registry `mcp.call`
 Flag `webauto`: `--start-url URL` (lewati pencarian), `--max-steps N` (default 12).
 Agent hanya mengikuti link yang benar-benar ada di halaman — URL halusinasi
 diblokir. Tool agent: `web.search`, `web.fetch`, `web.links` (permission
-`web.read`). Batas jujur: web teks saja, tanpa JavaScript — untuk situs JS-heavy
-pakai Playwright sendiri (sengaja tidak di-bundle).
+`web.read`); di write mode tambah `web.forms`, `web.submit` (permission
+`browser.write`). **Write mode hanya HTTP-level (tanpa JavaScript)** — cocok
+untuk form server-rendered, bukan SPA. Setiap submit minta izin, lewat SSRF
+guard, dan tercatat di audit.
 
 ### Konektor aplikasi
 
@@ -399,4 +426,4 @@ Issue di `https://github.com/aziz-sudrajat/azzx`.
 
 ---
 
-*AZZX v10.6.3 — "Connected". MIT License.*
+*AZZX v10.6.7 — "Connected". MIT License.*

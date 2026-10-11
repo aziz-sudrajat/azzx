@@ -1,5 +1,63 @@
 # Changelog
 
+## v10.6.7 — "Clean & Lean" (dead code removal)
+
+Full static audit of all 56 script files: no dispatch bugs, no circular
+imports, no secrets, no TODO debt. The audit found dead code — removed:
+
+- 7 dead methods (verified zero call sites): `add_project_task`,
+  `update_session_summary` (session.py); `get_agent_summary`,
+  `purge_orphan_vectors` (memory.py); `iter_events` (streaming.py);
+  `search_memory` (multi_agent.py); `thoughts` (reasoning.py)
+- 15 unused imports: 12 in azzx_cli.py (`base64`, `getpass`, `textwrap`,
+  `uuid`, `Iterable`, `Optional`, 6× `rich.progress`), 3 in cli_v10.py
+- Kept deliberately: `message_bus.py` (live — used by multi_agent +
+  orchestrator), the provider re-export block in azzx_cli.py (backwards compat)
+
+Less code = faster startup on kentang machines. Zero behavior change.
+
+## v10.6.6 — command consolidation: fewer commands, same power
+
+- New `azzx do "<tugas>"`: the smart front door. Describe the task in plain
+  Indonesian/English, AZZX routes it to the right pipeline (fix, implement,
+  review, debug, test, web, remember, recall, plan, auto, compress, ask).
+  Offline keyword routing (deterministic, predictable); always prints which
+  command it runs; `--dry-run` to preview. New `azzx/agent/intent.py`.
+- New `azzx help`: curated grouped command guide (the simple view).
+- `--help` now shows 28 curated commands instead of 93 (usage line is
+  `<command>`). All 93 commands keep working — only the help display changed.
+- Added missing help texts for ask/fix/implement/review/debug/test/
+  remember/ai/doctor/config so the curated view is complete.
+
+## v10.6.5 — auto-chaining + browser two modes
+
+- Auto-chaining (v10.6.5): `fix`/`add`/`implement`/`review` now automatically
+  **recall** relevant memory before the AI runs and **learn** (distill into
+  staged proposals, never auto-approved) after. Opt out per run with
+  `--no-recall` / `--no-learn`. New `azzx/agent/autochain.py`.
+- Browser two modes: `azzx browse mode [read|write]`. `read` (default) is the
+  old behavior. `write` enables `web.forms` (list forms), `web.submit`
+  (fill + submit, HTTP-level, no JS), cookie sessions, and
+  `azzx webauto --write` (agent may submit forms to complete tasks).
+  Write mode is explicit opt-in; every submit needs `browser.write`
+  permission (ask by default, explicit deny is absolute), passes the SSRF
+  guard, and is audit-logged. New `azzx/agent/webforms.py`.
+- Fixed wrong `ToolSpec` import in webforms (would have broken tool registration).
+
+## v10.6.4 — file attachments for chat/GUI + local LLM docs
+
+- Fixed: `azzx chat` and `azzx gui` never sent project files to the AI, so
+  "analisa file X" always failed. Now: `@path/to/file` mentions in any
+  message attach the file (read + auto-compressed), and `/add <file>`
+  keeps files attached for the session (`/added`, `/unadd`). Paths are
+  jailed to the workspace (`@../secret` refused); binaries/>2MiB skipped.
+- New `azzx/agent/attachments.py`; wired into `cmd_chat` and the GUI
+  server (`_chat_once`/`_chat_stream`); GUI placeholder hints @file.
+- Documented local LLM support: Ollama preset (keyless,
+  `http://127.0.0.1:11434/v1`) + Custom OpenAI-compatible endpoints
+  (e.g. LM Studio) via `azzx ai`.
+- Fixed `/add` duplicate-list bug found during testing.
+
 ## v10.6.3 — Termux/Android sandbox fix
 
 - Fixed `sandbox.exec` (local backend) on Termux/Android: the 512 MiB

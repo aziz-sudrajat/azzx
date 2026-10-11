@@ -1,4 +1,4 @@
-# AZZX v10.6.3 — Your Personal AI Agent
+# AZZX v10.6.7 — Your Personal AI Agent
 
 **One unified AI agent for your terminal.** Chat with it like a friend, let it plan
 and execute tasks autonomously, and run it on anything from a flagship PC to a
@@ -7,11 +7,15 @@ low-end "kentang" laptop or an Android phone with Termux.
 ```bash
 bash install.sh                 # installs to ~/.local/share, adds the `azzx` command
 azzx setup                      # tell AZZX your name (stored locally, privately)
+azzx do "perbaiki bug login"    # just describe it in plain language — AZZX routes it
 azzx chat                       # talk to your companion
 azzx auto "organize my downloads folder"   # autonomous: plan → approve → execute → learn
 ```
 
-[![Version](https://img.shields.io/badge/version-10.6.3-cyan)](./VERSION)
+> **Too many commands?** Start with `azzx do` and `azzx help`. The full set
+> (93 commands) still works — `--help` just shows the 28 you'll use daily.
+
+[![Version](https://img.shields.io/badge/version-10.6.7-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
@@ -94,6 +98,12 @@ Configure an AI provider (OpenAI-compatible, Anthropic, Cohere, or local Ollama)
 azzx ai         # interactive provider setup (keys go to the secure vault)
 ```
 
+**Local LLM (no cloud needed):** install [Ollama](https://ollama.com),
+pull a model (`ollama pull qwen2.5-coder:7b`), then `azzx ai` → choose
+**Ollama** — no API key required, everything stays on your machine.
+Any OpenAI-compatible local server works too via the **Custom** provider
+option (set base URL to e.g. `http://127.0.0.1:1234/v1` for LM Studio).
+
 > No provider yet? Most commands that don't need AI (`exec`, `checkpoint`,
 > `schedule`, `doctor`, …) work offline.
 
@@ -138,7 +148,13 @@ for full flags.
 | `azzx gateway telegram` | Run AZZX as a Telegram bot on your phone | `azzx gateway telegram --token $TG --allow-from 123456` |
 
 `azzx chat` slash commands: `/plan`, `/auto`, `/agent`, `/learn`,
-`/remember <fact>`, `/memory <q>`, `/skills`, `/trace`, `/clear`, `/quit`.
+`/remember <fact>`, `/memory <q>`, `/skills`, `/trace`, `/clear`, `/quit`,
+`/add <file>`, `/added`, `/unadd <file>`.
+
+**Let the AI read your files:** mention `@path/to/file` in any chat or GUI
+message (e.g. `analisa @main.py`), or `/add main.py` to keep a file attached
+for the whole session. Large files are auto-compressed. Paths stay inside
+your workspace — `@../secret` is refused.
 
 ### Autonomous agent
 
@@ -259,9 +275,14 @@ The agent can also call MCP tools itself via the `mcp.call` registry tool
 | Command | What it does | Example |
 |---|---|---|
 | `azzx ask "<q>"` | Ask the AI about your project | `azzx ask "di mana bug login?"` |
-| `azzx fix "<desc>"` | AI-driven code fix | `azzx fix "null pointer di handler"` |
+| `azzx fix "<desc>"` | AI-driven code fix — auto-recalls relevant memory, auto-distills learnings after | `azzx fix "null pointer di handler"` |
 | `azzx add "<desc>"` | Implement a feature | `azzx add "tambah retry ke client"` |
-| `azzx review` | Static code review | `azzx review --focus security` |
+| `azzx review` | Static code review — auto-recalls relevant memory, auto-distills learnings after | `azzx review --focus security` |
+
+> **Auto-chaining:** `fix`, `add`, `implement`, and `review` automatically
+> invoke each other's siblings — memory is recalled before the AI runs,
+> learnings are distilled (staged, never auto-approved) after. Opt out per
+> run: `--no-recall`, `--no-learn`.
 | `azzx test` | Run tests | `azzx test` |
 | `azzx debug <cmd>` | Run + diagnose a failing command | `azzx debug "python3 main.py"` |
 | `azzx autodebug <cmd>` | Loop: run → fix → run | `azzx autodebug "pytest -x"` |
@@ -277,7 +298,11 @@ The agent can also call MCP tools itself via the `mcp.call` registry tool
 
 | Command | What it does | Example |
 |---|---|---|
-| `azzx webauto "<task>"` | **Goal-driven browsing that solves by itself:** searches, opens pages, follows links until it can answer (read-only) | `azzx webauto "berapa harga kopi robusta hari ini"` |
+| `azzx webauto "<task>"` | **Goal-driven browsing that solves by itself:** searches, opens pages, follows links until it can answer | `azzx webauto "berapa harga kopi robusta hari ini"` |
+| `azzx webauto "<task>" --write` | Same, but the agent may also submit HTML forms to complete tasks (needs write mode) | `azzx webauto "cari form kontak" --write -y` |
+| `azzx browse mode [read\|write]` | Browser mode: `read` (default, look-only) or `write` (may submit forms) | `azzx browse mode write` |
+| `azzx browse forms <url>` | List HTML forms on a page (read-only) | `azzx browse forms https://example.com` |
+| `azzx browse submit <url>` | Fill + submit a form (`--form N --field k=v`, needs write mode) | `azzx browse submit https://example.com --form 0 --field q=kopi` |
 | `azzx browse search "<q>"` | Web search (DuckDuckGo) | `azzx browse search "harga kopi"` |
 | `azzx browse fetch <url>` | Fetch a page as readable text (no JS rendering) | `azzx browse fetch https://example.com` |
 | `azzx browse links <url>` | List a page's outbound links | `azzx browse links https://example.com` |
@@ -285,7 +310,10 @@ The agent can also call MCP tools itself via the `mcp.call` registry tool
 `webauto` flags: `--start-url URL` (skip search), `--max-steps N` (default 12).
 The agent only follows links actually present on the page — hallucinated URLs
 are blocked. Agent tools: `web.search`, `web.fetch`, `web.links` (permission
-`web.read`). Honest limit: text web only, no JavaScript — for JS-heavy sites
+`web.read`); in write mode also `web.forms`, `web.submit` (permission
+`browser.write`). **Write mode is HTTP-level only (no JavaScript)** — it handles
+server-rendered forms, not SPAs. Every submit asks permission, passes the SSRF
+guard, and is audit-logged.
 use Playwright separately (deliberately not bundled).
 
 ### Connectors
@@ -415,4 +443,4 @@ Open an issue at `https://github.com/aziz-sudrajat/azzx`.
 
 ---
 
-*AZZX v10.6.3 — "Connected". MIT License.*
+*AZZX v10.6.7 — "Connected". MIT License.*

@@ -162,31 +162,6 @@ class SessionMemoryJournal:
             )
             conn.commit()
 
-    def add_project_task(
-        self,
-        project: str,
-        summary: str,
-        agent_id: str | None = None,
-        task_id: str | None = None,
-        tags: list[str] | None = None,
-    ) -> None:
-        with closing(self._connect()) as conn:
-            conn.execute(
-                """
-                INSERT INTO project_index (project, task_id, agent_id, summary, tags, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    project,
-                    task_id,
-                    agent_id,
-                    summary,
-                    json.dumps(tags or [], ensure_ascii=False),
-                    self._utcnow(),
-                ),
-            )
-            conn.commit()
-
     def get_recent_sessions(self, project: str | None = None, limit: int = 10,
                             status: str | None = None) -> list[dict[str, Any]]:
         query = "SELECT * FROM sessions"
@@ -351,14 +326,6 @@ class SessionMemoryJournal:
         for entry in entries:
             summary_lines.append(f"- [{entry['agent_id'] or 'system'}] {entry['summary']}")
         return "\n".join(summary_lines)
-
-    def update_session_summary(self, session_id: str, summary: str) -> None:
-        with closing(self._connect()) as conn:
-            conn.execute(
-                "UPDATE sessions SET summary = ?, updated_at = ? WHERE session_id = ?",
-                (summary, self._utcnow(), session_id),
-            )
-            conn.commit()
 
 
 _DEFAULT_SESSION_JOURNAL: SessionMemoryJournal | None = None

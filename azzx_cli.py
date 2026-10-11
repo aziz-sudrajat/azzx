@@ -10,10 +10,8 @@ if str(_ROOT) not in _sys.path:
 
 import argparse
 import ast
-import base64
 import datetime as dt
 import difflib
-import getpass
 import hashlib
 import json
 import os
@@ -25,16 +23,14 @@ import stat
 import subprocess
 import sys
 import tempfile
-import textwrap
 import time
 import tarfile
 import urllib.parse
-import uuid
 import threading
 import queue
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any
 
 import httpx
 try:
@@ -51,13 +47,12 @@ from rich.rule import Rule
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm, IntPrompt, Prompt
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.text import Text
 
 APP_NAME = "AZZATSSINS LITE AGENT"
 APP_SLUG = "azzatssins-lite-agent"
-VERSION = "10.6.3"
+VERSION = "10.6.7"
 
 console = Console(highlight=False)
 
@@ -938,7 +933,7 @@ def format_file_context(root: Path, selected: list[Path], max_chars: int) -> str
         if used + len(chunk) > max_chars:
             remaining = max_chars - used
             if remaining > 1000:
-                # Smart compression instead of crude truncation (v10.6.3).
+                # Smart compression instead of crude truncation (v10.6.7).
                 try:
                     from azzx.agent.compressor import compress_text
                     res = compress_text(content, remaining - 200, "auto",
@@ -1327,13 +1322,24 @@ def render_change_summary(changes: list[dict[str, str]], root: Path) -> None:
     console.print(table)
 
 
-def run_edit_task(root: Path, instruction: str, mode: str = "fix", forced_provider: str | None = None, extra_context: str = "") -> bool:
+def run_edit_task(root: Path, instruction: str, mode: str = "fix", forced_provider: str | None = None, extra_context: str = "",
+                  do_recall: bool = True, do_learn: bool = True) -> bool:
     cfg = load_config()
     router = get_router()
     ensure_workspace_state(root)
 
     verb = {"fix": "Fix the problem", "add": "Add the requested feature", "implement": "Implement the request", "create": "Create the requested project/files"}.get(mode, "Implement the request")
     query = instruction
+    # Auto-chain: recall relevant memory into the context (v10.6.7).
+    if do_recall and not extra_context:
+        try:
+            from azzx.agent.autochain import recall_block
+            _rb = recall_block(instruction)
+            if _rb:
+                extra_context = _rb
+                console.print("[dim]Recalled relevant memory for this task.[/]")
+        except Exception:
+            pass
     context, selected, files = build_workspace_context(root, query, cfg)
 
     console.print(Panel(
@@ -1456,6 +1462,14 @@ TASK: {instruction}
         })
         if cfg.get("auto_test_after_edit", False):
             run_tests(root, quiet=False)
+        # Auto-chain: distill learnings into staged proposals (v10.6.7).
+        if do_learn:
+            try:
+                from azzx.agent.autochain import auto_learn, learn_note
+                _transcript = f"mode={mode}\nfiles={[c['path'] for c in changes]}\nsummary={summary}"
+                console.print(f"[dim]{learn_note(auto_learn(instruction, _transcript))}[/]")
+            except Exception:
+                pass
         return True
 
     if last_obj:
@@ -1529,16 +1543,27 @@ def run_ask(root: Path, question: str, forced_provider: str | None = None, strea
     write_history(root, {"action": "ask", "instruction": question, "result": "answered", "provider": result.provider_id, "model": result.model})
 
 
-def run_review(root: Path, focus: str = "", forced_provider: str | None = None) -> None:
+def run_review(root: Path, focus: str = "", forced_provider: str | None = None,
+               do_recall: bool = True, do_learn: bool = True) -> None:
     cfg = load_config()
     query = focus or "review bugs security logic performance maintainability entrypoints configuration"
+    # Auto-chain: recall relevant memory (v10.6.7).
+    _recall = ""
+    if do_recall:
+        try:
+            from azzx.agent.autochain import recall_block
+            _recall = recall_block(query)
+            if _recall:
+                console.print("[dim]Recalled relevant memory for this review.[/]")
+        except Exception:
+            pass
     context, selected, files = build_workspace_context(root, query, cfg)
     user = "Review this project."
     if focus:
         user += f" Focus especially on: {focus}."
     messages = [
         {"role": "system", "content": REVIEW_SYSTEM},
-        {"role": "user", "content": f"{user}\n\n{context}"},
+        {"role": "user", "content": f"{user}\n\n{_recall}{context}"},
     ]
     console.print(f"[dim]Review context: {len(selected)}/{len(files)} files[/]")
     with console.status("[cyan]Reviewing...[/]", spinner="dots"):
@@ -1546,6 +1571,13 @@ def run_review(root: Path, focus: str = "", forced_provider: str | None = None) 
     console.print(Panel(Markdown(result.text), title="CODE REVIEW", border_style="cyan"))
     show_route(result)
     write_history(root, {"action": "review", "instruction": focus, "result": "reviewed", "provider": result.provider_id, "model": result.model})
+    # Auto-chain: distill learnings into staged proposals (v10.6.7).
+    if do_learn:
+        try:
+            from azzx.agent.autochain import auto_learn, learn_note
+            console.print(f"[dim]{learn_note(auto_learn(f'review: {focus or query}', result.text[:4000]))}[/]")
+        except Exception:
+            pass
 
 
 def run_debug(root: Path, command: str, forced_provider: str | None = None) -> None:
@@ -5154,14 +5186,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--path", "-p", help="Workspace directory. Default: current directory")
     parser.add_argument("--ai", dest="forced_provider", help="Force configured provider ID for this command")
     parser.add_argument("--version", action="store_true", help="Show version")
-    sub = parser.add_subparsers(dest="command")
+    sub = parser.add_subparsers(dest="command", metavar="<command>")
 
+    _CMD_HELP = {"ask": "Ask the AI anything", "fix": "AI-driven code fix (auto recall + learn)",
+                 "add": "Add a feature (auto recall + learn)", "implement": "Implement a task (auto recall + learn)"}
     for name in ("ask", "fix", "add", "implement"):
-        sp = sub.add_parser(name)
+        sp = sub.add_parser(name, help=_CMD_HELP[name])
         sp.add_argument("text", nargs="+", help="Instruction/question")
         if name == "ask":
             sp.add_argument("--stream", action="store_true", help="Stream tokens as they arrive")
             sp.add_argument("--image", action="append", default=[], help="Image file for vision-capable models (repeatable)")
+        if name in ("fix", "add", "implement"):
+            sp.add_argument("--no-recall", action="store_true", help="Skip auto memory recall")
+            sp.add_argument("--no-learn", action="store_true", help="Skip auto learning distill")
     ag = sub.add_parser(
         "agent",
         help="Unified multi-agent run (planner/researcher/coder/reviewer/tester/security) via the configured AI provider",
@@ -5237,11 +5274,23 @@ def build_parser() -> argparse.ArgumentParser:
     br_s = br_sub.add_parser("search", help="Web search (DuckDuckGo)")
     br_s.add_argument("query")
     br_s.add_argument("--limit", type=int, default=8)
-    wa = sub.add_parser("webauto", help="Autonomous goal-driven web browsing (read-only)")
+    br_m = br_sub.add_parser("mode", help="Show or set browser mode (read|write)")
+    br_m.add_argument("value", nargs="?", default="", help="'read' (default) or 'write'")
+    br_fm = br_sub.add_parser("forms", help="List HTML forms on a page (read-only)")
+    br_fm.add_argument("url")
+    br_sb = br_sub.add_parser("submit", help="Fill + submit an HTML form (needs write mode)")
+    br_sb.add_argument("url")
+    br_sb.add_argument("--form", type=int, default=0, help="Form index (see browse forms)")
+    br_sb.add_argument("--field", action="append", default=[], help="field=value (repeatable)")
+    br_sb.add_argument("--session", default="default", help="Named cookie session")
+    br_sb.add_argument("-y", "--yes", action="store_true", help="Approve the submission")
+    wa = sub.add_parser("webauto", help="Autonomous goal-driven web browsing (read, or write with --write)")
     wa.add_argument("task")
     wa.add_argument("--start-url", default=None)
     wa.add_argument("--max-steps", type=int, default=12)
     wa.add_argument("--verbose", action="store_true")
+    wa.add_argument("--write", action="store_true", help="Allow form submission (needs browser write mode)")
+    wa.add_argument("-y", "--yes", action="store_true", help="Auto-approve form submissions")
     au = sub.add_parser("audit", help="Audit the agent: record all work, judge correctness")
     au_sub = au.add_subparsers(dest="audit_action")
     au_l = au_sub.add_parser("list", help="Recent audited tool calls")
@@ -5277,18 +5326,20 @@ def build_parser() -> argparse.ArgumentParser:
     create = sub.add_parser("create", help="Create a new project or scaffold")
     create.add_argument("text", nargs="+", help="Project description")
     create.add_argument("--name", help="Create inside a new child directory")
-    review = sub.add_parser("review")
+    review = sub.add_parser("review", help="Static code review (auto recall + learn)")
     review.add_argument("focus", nargs="*", help="Optional review focus")
-    debug = sub.add_parser("debug")
+    review.add_argument("--no-recall", action="store_true", help="Skip auto memory recall")
+    review.add_argument("--no-learn", action="store_true", help="Skip auto learning distill")
+    debug = sub.add_parser("debug", help="Run a command and diagnose failures")
     debug.add_argument("shell_command", nargs="+", help="Command to execute, e.g. python main.py")
     autodebug = sub.add_parser("autodebug")
     autodebug.add_argument("shell_command", nargs="+", help="Command to repeatedly run/fix")
     autodebug.add_argument("--iterations", type=int, default=None)
-    testp = sub.add_parser("test")
+    testp = sub.add_parser("test", help="Run project tests")
     testp.add_argument("shell_command", nargs="*", help="Optional custom test command")
     deps = sub.add_parser("deps")
     deps.add_argument("--install", action="store_true", help="Install requirements.txt after confirmation")
-    remember = sub.add_parser("remember")
+    remember = sub.add_parser("remember", help="Save a fact to long-term memory")
     remember.add_argument("text", nargs="+", help="Project rule/decision to remember")
     sub.add_parser("memory")
     sub.add_parser("index")
@@ -5380,16 +5431,16 @@ def build_parser() -> argparse.ArgumentParser:
     remote.add_argument("host")
     remote.add_argument("remote_path")
     remote.add_argument("azzx_args", nargs=argparse.REMAINDER)
-    sub.add_parser("ai")
+    sub.add_parser("ai", help="Configure AI provider (incl. local Ollama)")
     sub.add_parser("diff")
     undo = sub.add_parser("undo")
     undo.add_argument("-y", "--yes", action="store_true")
-    doctor_p = sub.add_parser("doctor")
+    doctor_p = sub.add_parser("doctor", help="Health check: Python, deps, providers")
     doctor_p.add_argument("--online", action="store_true", help="Try provider /models endpoints")
     sub.add_parser("scan")
     hist = sub.add_parser("history")
     hist.add_argument("--limit", type=int, default=20)
-    sub.add_parser("config")
+    sub.add_parser("config", help="Interactive configuration menu")
     mode = sub.add_parser("mode")
     mode.add_argument("value", choices=["safe", "normal", "auto"])
     perm = sub.add_parser("permissions", help="Inspect or change autonomous tool permissions")
@@ -5606,7 +5657,44 @@ def build_parser() -> argparse.ArgumentParser:
     hm = sub.add_parser("hermes", help="REMOVED in v10.4 — prints the migration guide")
     hm.add_argument("rest", nargs=argparse.REMAINDER, help="Ignored; shows the migration guide")
 
+    # v10.6.7: the smart front door — one command for everyday tasks.
+    do_p = sub.add_parser("do", help="Smart command: describe the task in plain language, AZZX routes it")
+    do_p.add_argument("text", nargs="*", help="What to do, e.g. \"perbaiki bug login\"")
+    do_p.add_argument("--dry-run", action="store_true", help="Only show where it would route")
+    hp = sub.add_parser("help", help="Curated command guide (the simple view)")
+
+    _suppress_non_curated_help(sub)
     return parser
+
+
+# v10.6.7: 93 commands exist but help shows only the curated front door.
+# Everything else keeps working — this only affects --help display.
+CURATED_HELP = {
+    "do", "chat", "gui",
+    "ask", "fix", "implement", "review", "debug", "test",
+    "auto", "agent", "plan",
+    "webauto", "browse",
+    "remember", "recall", "learn", "session",
+    "setup", "ai", "config", "doctor", "audit", "schedule", "checkpoint",
+    "compress", "exec", "help",
+}
+
+
+def _suppress_non_curated_help(sub: Any) -> None:
+    """Hide non-curated subcommands from --help (they still work).
+
+    Note: argparse ignores help=SUPPRESS on subparsers (known limitation —
+    it prints literally). So we drop the pseudo-action from
+    _choices_actions; the command stays usable via _name_parser_map.
+    """
+    try:
+        actions = getattr(sub, "_choices_actions", None)
+        if not actions:
+            return
+        sub._choices_actions = [p for p in actions
+                                if getattr(p, "dest", "") in CURATED_HELP]
+    except Exception:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -5714,13 +5802,17 @@ def main(argv: list[str] | None = None) -> int:
             from azzx.cli_v10 import cmd_agent
             return cmd_agent(args, root, forced)
         elif args.command == "fix":
-            run_edit_task(root, " ".join(args.text), "fix", forced)
+            run_edit_task(root, " ".join(args.text), "fix", forced,
+                          do_recall=not args.no_recall, do_learn=not args.no_learn)
         elif args.command == "add":
-            run_edit_task(root, " ".join(args.text), "add", forced)
+            run_edit_task(root, " ".join(args.text), "add", forced,
+                          do_recall=not args.no_recall, do_learn=not args.no_learn)
         elif args.command == "implement":
-            run_edit_task(root, " ".join(args.text), "implement", forced)
+            run_edit_task(root, " ".join(args.text), "implement", forced,
+                          do_recall=not args.no_recall, do_learn=not args.no_learn)
         elif args.command == "review":
-            run_review(root, " ".join(args.focus), forced)
+            run_review(root, " ".join(args.focus), forced,
+                       do_recall=not args.no_recall, do_learn=not args.no_learn)
         elif args.command == "debug":
             run_debug(root, " ".join(args.shell_command), forced)
         elif args.command == "autodebug":
@@ -5916,6 +6008,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "webauto":
             from azzx.cli_v10 import cmd_webauto
             return cmd_webauto(args)
+        elif args.command == "do":
+            from azzx.cli_v10 import cmd_do
+            return cmd_do(args, root, forced)
+        elif args.command == "help":
+            from azzx.cli_v10 import cmd_help
+            return cmd_help(args)
         elif args.command == "audit":
             from azzx.cli_v10 import cmd_audit
             return cmd_audit(args)

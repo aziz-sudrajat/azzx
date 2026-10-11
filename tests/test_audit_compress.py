@@ -193,3 +193,48 @@ class NewParsersTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuditorClassifyTest(unittest.TestCase):
+    def test_permission_denied_classified(self):
+        from azzx.agent.auditor import _classify_error
+        from azzx.core import PermissionDenied, AzzxError
+        self.assertEqual(_classify_error(PermissionDenied("nope")), "denied")
+        self.assertEqual(_classify_error(AzzxError("denied by policy")), "denied")
+        self.assertEqual(_classify_error(ValueError("boom")), "error")
+        self.assertEqual(_classify_error(TimeoutError("timed out")), "timeout")
+
+
+class AttachmentsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(_tmp())
+        (self.tmp / "main.py").write_text("def hello():\n    return 1\n" * 40)
+        (self.tmp / "notes.txt").write_text("hello notes\n" * 10)
+
+    def test_mention_attaches(self):
+        from azzx.agent.attachments import resolve_mentions
+        msg, ctx = resolve_mentions("analisa @main.py", self.tmp)
+        self.assertIn("def hello", ctx)
+        self.assertIn("@main.py", msg)
+
+    def test_escape_blocked(self):
+        from azzx.agent.attachments import resolve_mentions
+        _, ctx = resolve_mentions("baca @../secret", self.tmp)
+        self.assertIn("outside workspace", ctx)
+
+    def test_missing_is_skip_note(self):
+        from azzx.agent.attachments import resolve_mentions
+        _, ctx = resolve_mentions("baca @nope.py", self.tmp)
+        self.assertIn("SKIP", ctx)
+
+    def test_resolve_in_root(self):
+        from azzx.agent.attachments import resolve_in_root
+        self.assertIsNotNone(resolve_in_root(self.tmp, "notes.txt"))
+        self.assertIsNone(resolve_in_root(self.tmp, "../x"))
+        self.assertIsNone(resolve_in_root(self.tmp, "nope.txt"))
+
+    def test_session_attachments(self):
+        from azzx.agent.attachments import session_attachments
+        ctx = session_attachments([self.tmp / "notes.txt"], self.tmp)
+        self.assertIn("hello notes", ctx)
+        self.assertEqual(session_attachments([], self.tmp), "")

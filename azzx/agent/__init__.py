@@ -73,6 +73,9 @@ from .connectors import register_connector_tools
 from .cronutil import describe_cron, next_cron_time, parse_cron
 from .auditor import end_run as audit_end_run, judge as audit_judge, log_custom as audit_log_custom, recent_calls as audit_recent_calls, report as audit_report, start_run as audit_start_run, stats as audit_stats
 from .compressor import compress_context, compress_file, compress_text, estimate_tokens
+from .attachments import attach_file, resolve_in_root, resolve_mentions, session_attachments
+from .autochain import auto_learn, learn_note, recall_block
+from .webforms import browser_mode, close_session, forms as web_forms, set_browser_mode, submit as web_submit
 from .planning import TodoList, generate_plan, get_todo_list, load_plan, render_plan_text
 from .reasoning import ReasoningTrace, ThoughtStep, STEP_KINDS
 from .sandbox import SandboxExecutor, SandboxResult, get_sandbox_executor

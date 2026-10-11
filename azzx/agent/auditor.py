@@ -128,9 +128,9 @@ def log_custom(tool: str, ok: bool = True, detail: str = "",
 
 
 def _classify_error(exc: BaseException) -> str:
-    name = type(exc).__name__
+    name = type(exc).__name__.lower()
     msg = str(exc).lower()
-    if "permissiondenied" in name or "denied" in msg or "not allowed" in msg:
+    if "permissiondenied" in name or "permission" in name or "denied" in msg or "not allowed" in msg:
         return "denied"
     if "timeout" in name.lower() or "timed out" in msg:
         return "timeout"

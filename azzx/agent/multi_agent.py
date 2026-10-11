@@ -267,10 +267,6 @@ class MultiAgentOrchestrator:
             importance=importance, tags=tags or [], shared=shared, project=project,
         )
 
-    def search_memory(self, query: str, agent_id: str | None = None, limit: int = 5) -> list[dict[str, Any]]:
-        hits = self.memory_store.search_hybrid(query=query, agent_id=agent_id, limit=limit)
-        return [m.to_dict() | {"score": round(s, 3)} for m, s in hits]
-
     def _memory_context(self, prompt: str, agent_id: str | None = None, limit: int = 5) -> str:
         if not prompt:
             return "No relevant memories found."

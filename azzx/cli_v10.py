@@ -345,7 +345,7 @@ def cmd_agent(args: Any, root: Any = None, forced_provider: str | None = None) -
 @_guard
 def cmd_queue(args: Any) -> int:
     from azzx.agent.orchestrator import register_all as _reg
-    from azzx.agent.tasks import TaskQueue, get_task_queue, spawn_drainer
+    from azzx.agent.tasks import TaskQueue, spawn_drainer
 
     _reg()
     action = getattr(args, "queue_action", None)
@@ -782,7 +782,7 @@ def cmd_exec(args: Any) -> int:
 @_guard
 def cmd_plan(args: Any) -> int:
     """azzx plan "<goal>" [--execute] [-y]."""
-    from azzx.agent.planning import generate_plan, render_plan_text, load_plan
+    from azzx.agent.planning import generate_plan, render_plan_text
     goal = " ".join(getattr(args, "text", []) or []).strip()
     if not goal:
         raise AzzxError('Usage: azzx plan "<goal>" [--execute]')
@@ -955,7 +955,6 @@ def cmd_chat(args: Any) -> int:
 
     try:
         from rich.console import Console
-        from rich.markdown import Markdown
         from rich.panel import Panel
         c = Console()
         use_rich = True
@@ -973,11 +972,19 @@ def cmd_chat(args: Any) -> int:
     history: list[dict[str, str]] = [
         {"role": "system", "content": companion_system_prompt()},
     ]
+    # Workspace root for @file mentions and /add (v10.6.4).
+    from pathlib import Path as _Path
+    try:
+        _root = _Path(getattr(args, "path", None) or ".").expanduser().resolve()
+    except Exception:
+        _root = _Path.cwd()
+    _attached: list[_Path] = []
     if use_rich:
-        c.print(Panel("AZZX interactive chat — type /help for commands, /quit to exit.",
-                      border_style="cyan"))
+        c.print(Panel("AZZX interactive chat — /help for commands, @file to let the AI "
+                      f"read a file. Workspace: {_root}", border_style="cyan"))
     else:
-        print("AZZX interactive chat — type /help for commands, /quit to exit.")
+        print("AZZX interactive chat — /help for commands, @file to attach. "
+              f"Workspace: {_root}")
 
     while True:
         try:
@@ -988,14 +995,19 @@ def cmd_chat(args: Any) -> int:
         if not line:
             continue
         if line.startswith("/"):
-            rc = _chat_slash(line, out, use_rich, history)
+            rc = _chat_slash(line, out, use_rich, history, root=_root, attached=_attached)
             if rc == "quit":
                 out("Bye.", "dim")
                 return 0
             continue
-        # Plain chat -> provider with memory context, streamed.
+        # Plain chat -> provider with memory context + file attachments, streamed.
         try:
+            from azzx.agent import attachments as AT
+            line, _mention_ctx = AT.resolve_mentions(line, _root)
+            _sess_ctx = AT.session_attachments(_attached, _root)
             prompt = assemble_memory_prompt(line)
+            if _sess_ctx or _mention_ctx:
+                prompt = prompt + "\n" + _sess_ctx + _mention_ctx
             messages = history + [{"role": "user", "content": prompt}]
             buf: list[str] = []
             for _pid, token in router.stream(messages):
@@ -1017,7 +1029,8 @@ def cmd_chat(args: Any) -> int:
             out(f"Error: {exc}", "red")
 
 
-def _chat_slash(line: str, out: Any, use_rich: bool, history: list) -> Any:
+def _chat_slash(line: str, out: Any, use_rich: bool, history: list,
+                root=None, attached=None) -> Any:
     parts = line.split(None, 1)
     cmd = parts[0].lower()
     arg = parts[1] if len(parts) > 1 else ""
@@ -1029,13 +1042,44 @@ def _chat_slash(line: str, out: Any, use_rich: bool, history: list) -> Any:
             "  /plan <goal>     generate an execution plan\n"
             "  /auto <goal>     autonomous run (plan -> approve -> execute -> learn)\n"
             "  /agent <task>    multi-agent pipeline\n"
+            "  /add <file>      attach a file to this session (AI can read it)\n"
+            "  /added           list attached files\n"
+            "  /unadd <file>    detach a file\n"
             "  /learn           show staged learnings\n"
             "  /remember <fakta> simpan fakta/preferensi tentangmu ke memori\n"
             "  /memory <q>      search persistent memory\n"
             "  /skills          list skills\n"
             "  /trace           recent execution timeline\n"
             "  /clear           clear chat history\n"
-            "  /quit            exit")
+            "  /quit            exit\n"
+            "Tip: mention @path/to/file in any message to let the AI read it.")
+        return None
+    if cmd == "/add":
+        from azzx.agent import attachments as AT
+        if not arg:
+            out("Usage: /add <file> — attach a file so the AI can read it", "yellow")
+            return None
+        p = AT.resolve_in_root(root, arg.strip())
+        if p is None:
+            out(f"Tidak bisa attach: {arg.strip()} (tidak ada / di luar workspace)", "red")
+            return None
+        if attached is not None and p not in attached:
+            attached.append(p)
+        out(f"✓ Attached: {p.name} (AI bisa membacanya sekarang)", "green")
+        return None
+    if cmd == "/added":
+        if not attached:
+            out("(belum ada file ter-attach — pakai /add <file> atau @file di pesan)", "dim")
+        else:
+            out("Attached:\n" + "\n".join(f"  • {p}" for p in attached))
+        return None
+    if cmd == "/unadd":
+        if not arg or not attached:
+            out("Usage: /unadd <file>", "yellow")
+            return None
+        before = len(attached)
+        attached[:] = [p for p in attached if p.name != arg.strip() and str(p) != arg.strip()]
+        out("✓ Detached." if len(attached) < before else "Tidak ada yang cocok.", "green")
         return None
     if cmd == "/remember":
         if not arg:
@@ -1146,9 +1190,42 @@ def cmd_gui(args: Any) -> int:
 
 @_guard
 def cmd_browse(args: Any) -> int:
-    """azzx browse fetch|links — lightweight web reader (no JS rendering)."""
-    from azzx.agent.webreader import fetch
+    """azzx browse fetch|links|mode|forms|submit — web reader + write mode."""
     action = getattr(args, "browse_action", "fetch")
+    if action == "mode":
+        from azzx.agent import webforms as WF
+        value = (getattr(args, "value", "") or "").strip().lower()
+        if value:
+            mode = WF.set_browser_mode(value)
+            warn = ""
+            if mode == "write":
+                warn = (" — WRITE mode: the agent may submit HTML forms "
+                        "(HTTP-level, no JS). Each submit still asks permission.")
+            print(f"Browser mode = {mode}{warn}")
+        else:
+            print(f"Browser mode = {WF.browser_mode()} (read|write)")
+        return 0
+    if action == "forms":
+        from azzx.agent import webforms as WF
+        _print_json(WF.forms(getattr(args, "url", "")))
+        return 0
+    if action == "submit":
+        from azzx.agent import webforms as WF
+        from azzx.agent.orchestrator import run_tool_call
+        fields: dict[str, str] = {}
+        for item in getattr(args, "field", []) or []:
+            if "=" in item:
+                k, v = item.split("=", 1)
+                fields[k.strip()] = v
+        result = run_tool_call("web.submit", {
+            "url": getattr(args, "url", ""),
+            "form_index": int(getattr(args, "form", 0) or 0),
+            "fields": fields,
+            "session": getattr(args, "session", "default") or "default",
+        }, force_yes=bool(getattr(args, "yes", False)))
+        _print_json(result)
+        return 0
+    from azzx.agent.webreader import fetch
     url = getattr(args, "url", "")
     page = fetch(url)
     if action == "links":
@@ -1204,10 +1281,17 @@ def cmd_connector(args: Any) -> int:
 
 @_guard
 def cmd_webauto(args: Any) -> int:
-    """azzx webauto "<task>" — autonomous goal-driven browsing (read-only)."""
+    """azzx webauto "<task>" — autonomous goal-driven browsing (read/write)."""
     from azzx.agent.webagent import WebAgent
     task = getattr(args, "task", "")
-    agent = WebAgent(max_steps=int(getattr(args, "max_steps", 12) or 12))
+    write = bool(getattr(args, "write", False))
+    if write:
+        from azzx.agent.webforms import browser_mode, WRITE
+        if browser_mode() != WRITE:
+            raise AzzxError("webauto --write needs browser write mode: azzx browse mode write")
+    agent = WebAgent(max_steps=int(getattr(args, "max_steps", 12) or 12),
+                     write_mode=write,
+                     noninteractive_submit=bool(getattr(args, "yes", False)))
     result = agent.run(task, start_url=getattr(args, "start_url", None) or None)
     try:
         from rich.console import Console
@@ -1322,4 +1406,138 @@ def cmd_compress(args: Any) -> int:
         _print_json({k: v for k, v in res.items() if k != "text"})
         if not getattr(args, "quiet", False):
             print(res["text"][:20000])
+    return 0
+
+
+def cmd_do(args: Any, root: Any, forced: Any = None) -> int:
+    """azzx do "<natural language>" — smart intent router (v10.6.6).
+
+    The single front door: detects intent from Indonesian/English keywords
+    (offline, deterministic) and runs the right pipeline. Always prints
+    which command it routes to, so users learn the underlying commands.
+    """
+    from azzx.agent.intent import route, describe_target
+
+    text = " ".join(getattr(args, "text", []) or []).strip()
+    if not text:
+        print("Usage: azzx do \"<apa yang mau dikerjakan>\"\n"
+              "Contoh:\n"
+              "  azzx do \"perbaiki bug login\"\n"
+              "  azzx do \"buatkan fungsi hitung diskon\"\n"
+              "  azzx do \"review kode ini\"\n"
+              "  azzx do \"cari harga kopi hari ini\"\n"
+              "  azzx do \"ingat bahwa saya suka kopi tubruk\"")
+        return 2
+    target, task, score = route(text)
+    print(f"→ {target}: {describe_target(target)}")
+    if getattr(args, "dry_run", False):
+        print(f"(dry-run: task = {task!r})")
+        return 0
+
+    import azzx_cli as A
+    if target == "fix":
+        return 0 if A.run_edit_task(root, task, "fix", forced) else 1
+    if target == "implement":
+        return 0 if A.run_edit_task(root, task, "implement", forced) else 1
+    if target == "review":
+        A.run_review(root, task, forced)
+        return 0
+    if target == "debug":
+        A.run_debug(root, task, forced)
+        return 0
+    if target == "test":
+        return 0 if A.run_tests(root, task or None) else 1
+    if target == "web":
+        from azzx.agent.webagent import WebAgent
+        agent = WebAgent()
+        res = agent.run(task)
+        print(res.get("answer", res))
+        return 0 if res.get("status") == "answered" else 2
+    if target == "fetch":
+        from azzx.agent.webreader import fetch
+        page = fetch(task.split()[0] if task else "")
+        print(page.get("text", "")[:8000])
+        return 0
+    if target == "remember":
+        from azzx.agent.companion import remember_fact
+        res = remember_fact(task)
+        print(f"✓ Diingat: {res.get('stored', task)}")
+        return 0
+    if target == "recall":
+        from azzx.agent.orchestrator import get_memory_store
+        store = get_memory_store()
+        hits = store.search_hybrid(query=task, limit=5) or []
+        if not hits:
+            print("(tidak ada memori yang cocok)")
+        for entry, _s in hits:
+            print(f"• {getattr(entry, 'content', '')[:200]}")
+        return 0
+    if target == "plan":
+        from azzx.agent.planning import generate_plan, render_plan_text
+        print(render_plan_text(generate_plan(task)))
+        return 0
+    if target == "auto":
+        from azzx.agent.autonomy import AutonomousRunner
+        res = AutonomousRunner(auto_approve=False).run(task)
+        print(f"status: {res.get('status')}")
+        return 0
+    if target == "compress":
+        from azzx.agent.compressor import compress_file
+        res = compress_file(task.split()[0] if task else "")
+        print(f"compressed {res['original_chars']} → {res['compressed_chars']} chars "
+              f"({res['strategy']})")
+        return 0
+    # fallback: ask
+    A.run_ask(root, task or text, forced)
+    return 0
+
+
+def cmd_help(args: Any) -> int:
+    """azzx help — the curated command guide (v10.6.6)."""
+    groups = [
+        ("MULAI DARI SINI", [
+            ("do \"<tugas>\"", "Perintah pintar — ketik bahasa sehari-hari, AZZX yang routing"),
+            ("chat", "Ngobrol dengan AZZX (bisa @file, /add)"),
+            ("gui", "Tampilan web seperti ChatGPT"),
+        ]),
+        ("BANGUN & PERBAIKI", [
+            ("fix \"<masalah>\"", "Perbaiki kode (auto recall + learn)"),
+            ("implement \"<fitur>\"", "Bangun fitur baru"),
+            ("review", "Review kode"),
+            ("test", "Jalankan test project"),
+            ("auto \"<tujuan>\"", "Mode otonom: plan → approve → execute → learn"),
+        ]),
+        ("WEB", [
+            ("webauto \"<tugas>\"", "Browsing yang menyelesaikan tugas sendiri"),
+            ("browse fetch <url>", "Ambil halaman sebagai teks"),
+            ("browse mode [read|write]", "Mode browser"),
+        ]),
+        ("MEMORI & BELAJAR", [
+            ("remember \"<fakta>\"", "Simpan fakta ke memori"),
+            ("recall \"<q>\"", "Cari di memori"),
+            ("learn", "Lihat usulan learning (staged)"),
+        ]),
+        ("SISTEM", [
+            ("setup", "Setup awal"), ("ai", "Setup AI provider (termasuk Ollama lokal)"),
+            ("doctor", "Cek kesehatan"), ("audit", "Audit pekerjaan agent"),
+            ("schedule", "Jadwalkan tugas"), ("checkpoint", "Checkpoint project"),
+        ]),
+    ]
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        c = Console()
+        for title, rows in groups:
+            t = Table(title=title, show_header=False, border_style="dim")
+            t.add_column("cmd", style="cyan")
+            t.add_column("desc")
+            for cmd, desc in rows:
+                t.add_row(f"azzx {cmd}", desc)
+            c.print(t)
+        c.print("\n[dim]Semua 93 command tetap bisa dipakai langsung — ini hanya jalan pintas.[/]")
+    except Exception:
+        for title, rows in groups:
+            print(f"\n== {title} ==")
+            for cmd, desc in rows:
+                print(f"  azzx {cmd:28s} {desc}")
     return 0

@@ -70,9 +70,6 @@ class ReasoningTrace:
     def duration_s(self) -> float:
         return round(time.time() - self.started_at, 2)
 
-    def thoughts(self) -> list[str]:
-        return [s.content for s in self.steps if s.kind == "thought"]
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "task": self.task,
