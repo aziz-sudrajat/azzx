@@ -15,7 +15,7 @@ azzx auto "organize my downloads folder"   # autonomous: plan → approve → ex
 > **Too many commands?** Start with `azzx do` and `azzx help`. The full set
 > (93 commands) still works — `--help` just shows the 28 you'll use daily.
 
-[![Version](https://img.shields.io/badge/version-10.6.15-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.6.16-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)

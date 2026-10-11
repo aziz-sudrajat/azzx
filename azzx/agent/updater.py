@@ -145,8 +145,10 @@ def update(yes: bool = False) -> dict[str, Any]:
         with tarfile.open(tgz, "r:gz") as tf:
             # Security: prevent path traversal in tarball.
             for m in tf.getmembers():
-                if not m.name.startswith("azzx-main/"):
+                if m.name != "azzx-main" and not m.name.startswith("azzx-main/"):
                     raise AzzxError(f"unexpected tarball entry: {m.name}")
+                if ".." in m.name.split("/"):
+                    raise AzzxError(f"path traversal in tarball: {m.name}")
             tf.extractall(tmp)
         src = Path(tmp) / "azzx-main"
 

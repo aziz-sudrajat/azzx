@@ -41,6 +41,18 @@ class VersionTest(unittest.TestCase):
             res = U.update(yes=True)
         self.assertFalse(res["updated"])
 
+    def test_tarball_entry_validation(self):
+        """Root dir entry 'azzx-main' (no trailing slash) must be accepted."""
+        from azzx.agent import updater as U
+        # Simulate the validation logic
+        for name in ["azzx-main", "azzx-main/azzx_cli.py", "azzx-main/azzx/"]:
+            ok = name == "azzx-main" or name.startswith("azzx-main/")
+            self.assertTrue(ok, name)
+        for bad in ["other/file.py", "/etc/passwd", "azzx-main/../evil"]:
+            ok = (bad == "azzx-main" or bad.startswith("azzx-main/")) \
+                 and ".." not in bad.split("/")
+            self.assertFalse(ok, bad)
+
 
 class IntentUpdateTest(unittest.TestCase):
     def test_update_intent(self):

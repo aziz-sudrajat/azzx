@@ -1,5 +1,13 @@
 # Changelog
 
+## v10.6.16 — Bugfix: self-update tarball validation
+
+`azzx self-update` failed with `unexpected tarball entry: azzx-main`:
+the root directory entry in GitHub tarballs has no trailing slash,
+so the prefix check rejected it. Now accepts the root entry itself,
+plus an explicit `..` traversal check for Python 3.10/3.11.
+
+
 ## v10.6.15 — Bugfix: GUI chat hung after first message
 
 Reported: first GUI chat submit displayed a response, but subsequent
