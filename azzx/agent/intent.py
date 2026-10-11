@@ -75,6 +75,15 @@ INTENTS: list[tuple[frozenset[str], str, frozenset[str]]] = [
     (frozenset({"audit", "periksa pekerjaan", "cek audit", "nilai kerja"}),
      "audit",
      frozenset({"audit", "tolong"})),
+    (frozenset({"tambahkan fitur untukmu", "tambah fitur untukmu", "buatkan skill",
+                "extend", "fitur baru untukmu", "upgrade dirimu",
+                "tambahkan kemampuan", "skill baru"}),
+     "extend",
+     frozenset({"tambahkan", "tambah", "buatkan", "tolong"})),
+    (frozenset({"kembangkan dirimu", "belajar dari kebiasaanku", "evolve",
+                "perbaiki dirimu", "upgrade dirimu sendiri", "analisa kebiasaanku"}),
+     "evolve",
+     frozenset({"tolong"})),
     (frozenset({"tanya", "ask", "jelaskan", "gimana", "bagaimana", "apa itu",
                 "kenapa", "mengapa"}),
      "ask",
@@ -109,6 +118,13 @@ def route(text: str) -> tuple[str, str, int]:
     words = _words(text)
     wordset = set(words)
     lowered = text.lower()
+    # Multi-word phrase at the START beats single first-word matches:
+    # "tambahkan fitur untukmu" -> extend, not implement.
+    for keywords, target, _strip in INTENTS:
+        for kw in keywords:
+            if " " in kw and lowered.startswith(kw + " ") or lowered == kw:
+                _, task, _ = _strip_leading(target, _strip, words, text)
+                return target, task, 99
     # Explicit leading verb wins outright: "debug X" -> debug, "review X" -> review.
     # Generic maker verbs ("buatkan", "buat", ...) don't count — the object
     # decides: "buatkan rencana" -> plan, "buatkan fungsi" -> implement.
@@ -129,7 +145,7 @@ def route(text: str) -> tuple[str, str, int]:
         for kw in keywords:
             if " " in kw:
                 if kw in lowered:
-                    score += 2
+                    score += 3  # multi-word phrases are more specific
                     right = max(right, lowered.find(kw))
             elif kw in wordset:
                 score += 2 if len(kw) > 4 else 1
@@ -173,5 +189,7 @@ def describe_target(target: str) -> str:
         "checkpoint": "snapshot the working directory",
         "schedule": "list scheduled jobs",
         "audit": "audit the agent's recent work",
+        "extend": "build a new skill/feature for itself",
+        "evolve": "self-improvement: learn habits, propose upgrades",
         "ask": "ask the AI anything",
     }.get(target, target)

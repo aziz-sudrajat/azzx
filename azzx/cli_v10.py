@@ -1501,6 +1501,10 @@ def cmd_do(args: Any, root: Any, forced: Any = None) -> int:
     if target == "audit":
         from types import SimpleNamespace
         return cmd_audit(SimpleNamespace(audit_action="list", limit=15, run=""))
+    if target == "extend":
+        return cmd_extend(SimpleNamespace(text=[task], dry_run=False), root, forced)
+    if target == "evolve":
+        return cmd_evolve(SimpleNamespace(evolve_action="analyze"), root)
     # fallback: ask
     A.run_ask(root, task or text, forced)
     return 0
@@ -1555,3 +1559,116 @@ def cmd_help(args: Any) -> int:
             for cmd, desc in rows:
                 print(f"  azzx {cmd:28s} {desc}")
     return 0
+
+
+def cmd_extend(args: Any, root: Any, forced: Any = None) -> int:
+    """azzx extend "<request>" — AZZX builds a new skill for itself (v10.6.9)."""
+    from azzx.agent.selfextend import extend_feature, generate_skill
+
+    text = " ".join(getattr(args, "text", []) or []).strip()
+    if not text:
+        print("Usage: azzx extend \"<fitur yang diinginkan>\"\n"
+              "Contoh:\n"
+              "  azzx extend \"buatkan tool untuk menghitung kata di file\"\n"
+              "  azzx extend \"skill untuk convert celsius ke fahrenheit\"\n"
+              "\nHasilnya berupa skill baru (untrusted + disabled).\n"
+              "Review kodenya, lalu aktifkan manual:\n"
+              "  azzx skills trust <id> && azzx skills enable <id>")
+        return 2
+    if getattr(args, "dry_run", False):
+        print(f"Would generate a skill for: {text!r}")
+        print("(dry-run: no AI call, nothing installed)")
+        return 0
+    print(f"→ Generating skill for: {text}")
+    print("  (AI menulis kode → validasi → install sebagai untrusted+disabled)")
+    try:
+        result = extend_feature(text, forced)
+    except Exception as exc:
+        print(f"✗ Gagal: {exc}")
+        return 1
+    print(f"\n✓ Skill '{result['skill_id']}' v{result['version']} dibuat "
+          f"({result['handler_lines']} baris).")
+    print("  Status: UNTRUSTED + DISABLED (aman — tidak aktif otomatis).")
+    print("\nLangkah selanjutnya:")
+    for step in result["next_steps"]:
+        print(f"  • {step}")
+    return 0
+
+
+def cmd_evolve(args: Any, root: Any) -> int:
+    """azzx evolve analyze|propose|proposals|approve|reject — self-improvement (v10.6.10)."""
+    from azzx.agent import evolve as E
+
+    action = getattr(args, "evolve_action", "") or "analyze"
+    if action == "analyze":
+        f = E.analyze()
+        print(f"Observasi dari {f['total_calls']} tool calls:")
+        if f.get("note"):
+            print(f"  {f['note']}")
+            return 0
+        print("\n  Kebiasaan (tool tersering):")
+        for t in f["top_tools"][:5]:
+            print(f"    • {t['tool']}: {t['calls']}x")
+        if f["failure_hotspots"]:
+            print("\n  Titik kegagalan:")
+            for h in f["failure_hotspots"]:
+                print(f"    • {h['tool']}: {h['total']} error {h['errors']}")
+        if f["common_sequences"]:
+            print("\n  Pola berulang:")
+            for s in f["common_sequences"]:
+                print(f"    • {s['first']} → {s['then']}: {s['count']}x")
+        if f["denied_count"]:
+            print(f"\n  Permission ditolak: {f['denied_count']}x")
+        print("\nJalankan `azzx evolve propose` untuk minta AI membuat usulan perbaikan.")
+        return 0
+    if action == "propose":
+        print("→ Menganalisis kebiasaan & meminta AI membuat usulan...")
+        try:
+            res = E.propose()
+        except Exception as exc:
+            print(f"✗ Gagal: {exc}")
+            return 1
+        if res.get("staged", 0) == 0:
+            print(f"  {res.get('note', 'tidak ada usulan')}")
+            return 0
+        print(f"✓ {res['staged']} usulan dibuat (BELUM diterapkan).")
+        print(f"  Review: azzx evolve proposals")
+        return 0
+    if action == "proposals":
+        items = E.list_proposals()
+        if not items:
+            print("Tidak ada usulan pending. Jalankan `azzx evolve propose`.")
+            return 0
+        for p in items:
+            print(f"\n[{p['id']}] ({p['type']}/{p['risk']}) {p['title']}")
+            print(f"  {p['description']}")
+            for ch in p.get("changes", []):
+                print(f"    → {ch.get('kind')}: {ch.get('file') or ch.get('detail', '')[:60]}")
+        print(f"\nTerapkan: azzx evolve approve <id>   |   Tolak: azzx evolve reject <id>")
+        return 0
+    if action == "approve":
+        pid = getattr(args, "proposal_id", "")
+        try:
+            res = E.approve(pid, force=getattr(args, "force", False),
+                            project_root=root,
+                            auto_yes=getattr(args, "yes", False))
+        except Exception as exc:
+            print(f"✗ Gagal: {exc}")
+            return 1
+        print(f"✓ Proposal {res['id']} diterapkan (checkpoint: {res['checkpoint']}).")
+        for a in res["applied"]:
+            print(f"  • {a}")
+        if res.get("note"):
+            print(f"  Catatan: {res['note']}")
+        return 0
+    if action == "reject":
+        pid = getattr(args, "proposal_id", "")
+        try:
+            E.reject(pid)
+        except Exception as exc:
+            print(f"✗ Gagal: {exc}")
+            return 1
+        print(f"✓ Proposal {pid} ditolak.")
+        return 0
+    print(f"Unknown evolve action: {action}")
+    return 2

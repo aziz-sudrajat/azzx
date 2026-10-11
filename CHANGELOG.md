@@ -1,5 +1,38 @@
 # Changelog
 
+## v10.6.10 — Self-improvement loop: `azzx evolve`
+
+AZZX now observes itself, learns user habits, and repairs its own code:
+
+- `azzx evolve analyze` — reads the audit trail: top tools (habits),
+  failure hotspots, repeated sequences, denied permissions.
+- `azzx evolve propose` — AI turns observations into staged proposals
+  (habit / fix / feature). Max 5, low-risk preferred.
+- `azzx evolve proposals` — review staged proposals.
+- `azzx evolve approve <id>` — checkpoint → AI generates unified diff →
+  user confirms each diff → apply → syntax check. Auto-rollback on failure.
+  `--yes` skips per-diff confirmation.
+- `azzx evolve reject <id>` — discard a proposal.
+- Self-protection: proposals touching permissions.py / auditor.py /
+  evolve.py are rejected unless --force. Nothing auto-applies — the user
+  is always the gate.
+- `azzx do "kembangkan dirimu"` routes to evolve.
+
+
+## v10.6.9 — Self-extension: AZZX builds its own features
+
+- NEW `azzx extend "<request>"`: AI generates a NEW SKILL from a feature
+  request. Generated code goes through the EXISTING trust infrastructure:
+  manifest validation (bans exec/eval/install hooks), syntax check,
+  dangerous-pattern scan (subprocess/os.system/socket/eval), then install
+  as UNTRUSTED + DISABLED. User reviews code, then explicitly runs
+  `azzx skills trust <id>` + `azzx skills enable <id>`. AI can never
+  silently activate code.
+- `azzx do "tambahkan fitur untukmu X"` routes to extend.
+- Router fix: multi-word phrases score higher (3) and leading phrases
+  beat single first-word matches.
+
+
 ## v10.6.8 — `do` router expansion (P1)
 
 - `azzx do` now routes 4 more intents (17 total): `doctor` ("cek kesehatan

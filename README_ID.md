@@ -15,7 +15,7 @@ azzx auto "rapikan folder download"   # otonom: rencana → setujui → eksekusi
 > **Kebanyakan command?** Mulai dari `azzx do` dan `azzx help`. Semua 93
 > command tetap bisa dipakai — `--help` hanya menampilkan 28 yang paling sering dipakai.
 
-[![Version](https://img.shields.io/badge/version-10.6.8-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.6.10-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 

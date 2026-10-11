@@ -52,7 +52,7 @@ from rich.text import Text
 
 APP_NAME = "AZZATSSINS LITE AGENT"
 APP_SLUG = "azzatssins-lite-agent"
-VERSION = "10.6.8"
+VERSION = "10.6.10"
 
 console = Console(highlight=False)
 
@@ -933,7 +933,7 @@ def format_file_context(root: Path, selected: list[Path], max_chars: int) -> str
         if used + len(chunk) > max_chars:
             remaining = max_chars - used
             if remaining > 1000:
-                # Smart compression instead of crude truncation (v10.6.8).
+                # Smart compression instead of crude truncation (v10.6.10).
                 try:
                     from azzx.agent.compressor import compress_text
                     res = compress_text(content, remaining - 200, "auto",
@@ -1330,7 +1330,7 @@ def run_edit_task(root: Path, instruction: str, mode: str = "fix", forced_provid
 
     verb = {"fix": "Fix the problem", "add": "Add the requested feature", "implement": "Implement the request", "create": "Create the requested project/files"}.get(mode, "Implement the request")
     query = instruction
-    # Auto-chain: recall relevant memory into the context (v10.6.8).
+    # Auto-chain: recall relevant memory into the context (v10.6.10).
     if do_recall and not extra_context:
         try:
             from azzx.agent.autochain import recall_block
@@ -1462,7 +1462,7 @@ TASK: {instruction}
         })
         if cfg.get("auto_test_after_edit", False):
             run_tests(root, quiet=False)
-        # Auto-chain: distill learnings into staged proposals (v10.6.8).
+        # Auto-chain: distill learnings into staged proposals (v10.6.10).
         if do_learn:
             try:
                 from azzx.agent.autochain import auto_learn, learn_note
@@ -1547,7 +1547,7 @@ def run_review(root: Path, focus: str = "", forced_provider: str | None = None,
                do_recall: bool = True, do_learn: bool = True) -> None:
     cfg = load_config()
     query = focus or "review bugs security logic performance maintainability entrypoints configuration"
-    # Auto-chain: recall relevant memory (v10.6.8).
+    # Auto-chain: recall relevant memory (v10.6.10).
     _recall = ""
     if do_recall:
         try:
@@ -1571,7 +1571,7 @@ def run_review(root: Path, focus: str = "", forced_provider: str | None = None,
     console.print(Panel(Markdown(result.text), title="CODE REVIEW", border_style="cyan"))
     show_route(result)
     write_history(root, {"action": "review", "instruction": focus, "result": "reviewed", "provider": result.provider_id, "model": result.model})
-    # Auto-chain: distill learnings into staged proposals (v10.6.8).
+    # Auto-chain: distill learnings into staged proposals (v10.6.10).
     if do_learn:
         try:
             from azzx.agent.autochain import auto_learn, learn_note
@@ -5657,17 +5657,35 @@ def build_parser() -> argparse.ArgumentParser:
     hm = sub.add_parser("hermes", help="REMOVED in v10.4 — prints the migration guide")
     hm.add_argument("rest", nargs=argparse.REMAINDER, help="Ignored; shows the migration guide")
 
-    # v10.6.8: the smart front door — one command for everyday tasks.
+    # v10.6.10: the smart front door — one command for everyday tasks.
     do_p = sub.add_parser("do", help="Smart command: describe the task in plain language, AZZX routes it")
     do_p.add_argument("text", nargs="*", help="What to do, e.g. \"perbaiki bug login\"")
     do_p.add_argument("--dry-run", action="store_true", help="Only show where it would route")
     hp = sub.add_parser("help", help="Curated command guide (the simple view)")
 
+    # v10.6.10: self-extension — AZZX writes new skills for itself.
+    ex = sub.add_parser("extend", help="Ask AZZX to build a new feature/skill for itself")
+    ex.add_argument("text", nargs="*", help='Feature request, e.g. "buatkan tool hitung kata"')
+    ex.add_argument("--dry-run", action="store_true", help="Only show what would be generated")
+
+    # v10.6.10: self-improvement loop — observe, learn, propose, apply.
+    ev = sub.add_parser("evolve", help="Self-improvement: learn habits, propose upgrades")
+    ev_sub = ev.add_subparsers(dest="evolve_action")
+    ev_sub.add_parser("analyze", help="Analyze usage: habits + failure hotspots")
+    ev_sub.add_parser("propose", help="AI generates improvement proposals (staged, not applied)")
+    ev_sub.add_parser("proposals", help="List pending proposals")
+    eva = ev_sub.add_parser("approve", help="Approve & apply a proposal (checkpoint first)")
+    eva.add_argument("proposal_id", help="Proposal ID from 'evolve proposals'")
+    eva.add_argument("--force", action="store_true", help="Allow touching protected files (not recommended)")
+    eva.add_argument("--yes", action="store_true", help="Apply patches without per-diff confirmation")
+    evr = ev_sub.add_parser("reject", help="Reject a proposal")
+    evr.add_argument("proposal_id", help="Proposal ID from 'evolve proposals'")
+
     _suppress_non_curated_help(sub)
     return parser
 
 
-# v10.6.8: 93 commands exist but help shows only the curated front door.
+# v10.6.10: 93 commands exist but help shows only the curated front door.
 # Everything else keeps working — this only affects --help display.
 CURATED_HELP = {
     "do", "chat", "gui",
@@ -5676,7 +5694,7 @@ CURATED_HELP = {
     "webauto", "browse",
     "remember", "recall", "learn", "session",
     "setup", "ai", "config", "doctor", "audit", "schedule", "checkpoint",
-    "compress", "exec", "help",
+    "compress", "exec", "extend", "evolve", "help",
 }
 
 
@@ -6014,6 +6032,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "help":
             from azzx.cli_v10 import cmd_help
             return cmd_help(args)
+        elif args.command == "extend":
+            from azzx.cli_v10 import cmd_extend
+            return cmd_extend(args, root, forced)
+        elif args.command == "evolve":
+            from azzx.cli_v10 import cmd_evolve
+            return cmd_evolve(args, root)
         elif args.command == "audit":
             from azzx.cli_v10 import cmd_audit
             return cmd_audit(args)

@@ -9,7 +9,10 @@
 - [x] v10.6.4: `@file` attachments for chat/GUI; local LLM docs (Ollama)
 - [x] v10.6.5: auto-chaining (recall+learn); browser read/write modes
 - [x] v10.6.6: `azzx do` smart router; `--help` consolidation (93→28)
-- [x] v10.6.7: dead code removal (7 methods, 15 imports); full audit clean
+- [x] v10.6.7: dead code removal
+- [x] v10.6.8: `do` router expanded to 17 intents
+- [x] v10.6.9: self-extension
+- [x] v10.6.10: self-improvement loop (`azzx evolve`) (`azzx extend`) — AI writes new skills, trust-gated (7 methods, 15 imports); full audit clean
 
 ## Backlog (prioritized)
 
