@@ -1505,6 +1505,8 @@ def cmd_do(args: Any, root: Any, forced: Any = None) -> int:
         return cmd_extend(SimpleNamespace(text=[task], dry_run=False), root, forced)
     if target == "evolve":
         return cmd_evolve(SimpleNamespace(evolve_action="analyze"), root, forced)
+    if target == "self-update":
+        return cmd_update(SimpleNamespace(check=True, yes=False))
     # fallback: ask
     A.run_ask(root, task or text, forced)
     return 0
@@ -1674,3 +1676,33 @@ def cmd_evolve(args: Any, root: Any, forced: Any = None) -> int:
         return 0
     print(f"Unknown evolve action: {action}")
     return 2
+
+
+def cmd_update(args: Any) -> int:
+    """azzx self-update [--check] [--yes] — self-update from GitHub (v10.6.14)."""
+    from azzx.agent import updater as U
+
+    if getattr(args, "check", False):
+        try:
+            info = U.check()
+        except Exception as exc:
+            print(f"✗ Gagal cek update: {exc}")
+            return 1
+        if info["update_available"]:
+            print(f"Update tersedia: {info['local']} → {info['remote']}")
+            print("Jalankan `azzx update` untuk mengaplikasikan.")
+        else:
+            print(f"Sudah versi terbaru ({info['local']}).")
+        return 0
+    try:
+        res = U.update(yes=getattr(args, "yes", False))
+    except Exception as exc:
+        print(f"✗ Gagal: {exc}")
+        return 1
+    if res.get("updated"):
+        print(f"✓ Update {res['from']} → {res['to']} berhasil.")
+        print(f"  Backup: {res['backup']}")
+        print(f"  {res['note']}")
+    else:
+        print(f"  {res.get('note', '')} (versi {res.get('local', '')})")
+    return 0

@@ -66,8 +66,8 @@ class IntentTest(unittest.TestCase):
     def test_curated_help_is_small(self):
         import azzx_cli as a
         # The curated front door must stay small; everything else still works.
-        self.assertLessEqual(len(a.CURATED_HELP), 30)
-        for must in ("do", "help", "chat", "gui", "fix", "ask"):
+        self.assertLessEqual(len(a.CURATED_HELP), 32)
+        for must in ("do", "help", "chat", "gui", "fix", "ask", "self-update"):
             self.assertIn(must, a.CURATED_HELP)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## v10.6.14 — NEW: `azzx self-update`
+
+Update AZZX itself from GitHub without reinstalling manually:
+
+- `azzx self-update --check` — compare local vs GitHub VERSION, no changes.
+- `azzx self-update` — shows changelog, asks confirmation, backs up the
+  current install (last 3 kept), downloads the main-branch tarball,
+  replaces program files (same set as install.sh), verifies VERSION +
+  syntax, auto-rolls back on failure. User data and venv untouched.
+- `azzx do "update azzx"` routes to a check-only preview.
+- Named `self-update` to avoid clashing with the existing
+  `azzx update <app>` (application updates).
+
+
 ## v10.6.13 — Security hardening + docs (review round 3)
 
 Security audit of the self-modification pipeline:

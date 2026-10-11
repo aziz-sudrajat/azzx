@@ -84,6 +84,10 @@ INTENTS: list[tuple[frozenset[str], str, frozenset[str]]] = [
                 "perbaiki dirimu", "upgrade dirimu sendiri", "analisa kebiasaanku"}),
      "evolve",
      frozenset({"tolong"})),
+    (frozenset({"update azzx", "perbarui azzx", "upgrade azzx", "cek update",
+                "apakah ada update", "self update"}),
+     "self-update",
+     frozenset({"tolong"})),
     (frozenset({"tanya", "ask", "jelaskan", "gimana", "bagaimana", "apa itu",
                 "kenapa", "mengapa"}),
      "ask",
@@ -191,5 +195,6 @@ def describe_target(target: str) -> str:
         "audit": "audit the agent's recent work",
         "extend": "build a new skill/feature for itself",
         "evolve": "self-improvement: learn habits, propose upgrades",
+        "self-update": "update AZZX itself from GitHub",
         "ask": "ask the AI anything",
     }.get(target, target)
