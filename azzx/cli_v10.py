@@ -1487,6 +1487,20 @@ def cmd_do(args: Any, root: Any, forced: Any = None) -> int:
         print(f"compressed {res['original_chars']} → {res['compressed_chars']} chars "
               f"({res['strategy']})")
         return 0
+    if target == "doctor":
+        A.doctor(False)
+        return 0
+    if target == "checkpoint":
+        from azzx.agent import checkpoints
+        res = checkpoints.create(str(root), label=task or "do-checkpoint")
+        print(f"✓ Checkpoint: {res}")
+        return 0
+    if target == "schedule":
+        from types import SimpleNamespace
+        return cmd_schedule(SimpleNamespace(schedule_action="list"))
+    if target == "audit":
+        from types import SimpleNamespace
+        return cmd_audit(SimpleNamespace(audit_action="list", limit=15, run=""))
     # fallback: ask
     A.run_ask(root, task or text, forced)
     return 0

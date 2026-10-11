@@ -42,6 +42,12 @@ class IntentTest(unittest.TestCase):
         self.assertEqual(self._t("halo apa kabar"), "ask")
         self.assertEqual(self._t(""), "ask")
 
+    def test_system_intents(self):
+        self.assertEqual(self._t("cek kesehatan sistem"), "doctor")
+        self.assertEqual(self._t("buatkan checkpoint project ini"), "checkpoint")
+        self.assertEqual(self._t("lihat jadwal saya"), "schedule")
+        self.assertEqual(self._t("audit pekerjaan terakhir"), "audit")
+
     def test_task_cleaned(self):
         from azzx.agent.intent import route
         target, task, _ = route("perbaiki bug login")

@@ -1,4 +1,4 @@
-# AZZX v10.6.7 — Sahabat AI Pribadimu
+# AZZX v10.6.8 — Sahabat AI Pribadimu
 
 **Satu AI agent terpadu untuk terminal.** Ngobrol dengannya seperti teman, biarkan
 dia merencanakan dan mengeksekusi tugas secara mandiri, dan jalankan di mana saja —
@@ -15,7 +15,7 @@ azzx auto "rapikan folder download"   # otonom: rencana → setujui → eksekusi
 > **Kebanyakan command?** Mulai dari `azzx do` dan `azzx help`. Semua 93
 > command tetap bisa dipakai — `--help` hanya menampilkan 28 yang paling sering dipakai.
 
-[![Version](https://img.shields.io/badge/version-10.6.7-cyan)](./VERSION)
+[![Version](https://img.shields.io/badge/version-10.6.8-cyan)](./VERSION)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue)](.)
 [![Platform](https://img.shields.io/badge/platform-Termux%20%7C%20Linux-green)](.)
 
@@ -426,4 +426,4 @@ Issue di `https://github.com/aziz-sudrajat/azzx`.
 
 ---
 
-*AZZX v10.6.7 — "Connected". MIT License.*
+*AZZX v10.6.8 — "Connected". MIT License.*

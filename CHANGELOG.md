@@ -1,5 +1,13 @@
 # Changelog
 
+## v10.6.8 — `do` router expansion (P1)
+
+- `azzx do` now routes 4 more intents (17 total): `doctor` ("cek kesehatan
+  sistem"), `checkpoint` ("buatkan checkpoint"), `schedule` ("lihat jadwal"),
+  `audit` ("audit pekerjaan terakhir"). All are read-only or snapshot-only;
+  consequential actions (`schedule add`, `install`) intentionally NOT routed.
+- Fixed verb-stripping for the new intents.
+
 ## v10.6.7 — "Clean & Lean" (dead code removal)
 
 Full static audit of all 56 script files: no dispatch bugs, no circular
