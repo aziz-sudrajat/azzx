@@ -1,5 +1,21 @@
 # Changelog
 
+## v10.6.15 — Bugfix: GUI chat hung after first message
+
+Reported: first GUI chat submit displayed a response, but subsequent
+submits did nothing.
+
+Root cause: the SSE endpoint (`/api/chat/stream`) sent
+`Connection: keep-alive` and never closed the connection after `[DONE]`.
+The browser waited forever for more data, so the JS `busy` flag never
+reset and blocked every later submit.
+
+Fix (server): removed the `keep-alive` header, set `close_connection = True`,
+flush after `[DONE]` — the client now detects completion via close.
+Fix (client): `[DONE]` now breaks the outer read loop too, and the reader
+is cancelled after the stream ends (defense in depth).
+
+
 ## v10.6.14 — NEW: `azzx self-update`
 
 Update AZZX itself from GitHub without reinstalling manually:

@@ -116,8 +116,8 @@ async function sendMsg(text){
   const bubble=addMsg('ai','');bubble.style.display='none';let raw='';
   try{
     const es=await fetch('/api/chat/stream?message='+encodeURIComponent(text));
-    const rd=es.body.getReader(),dec=new TextDecoder();let buf='';
-    while(true){
+    const rd=es.body.getReader(),dec=new TextDecoder();let buf='';let streamDone=false;
+    while(!streamDone){
       const {done,value}=await rd.read();if(done)break;
       buf+=dec.decode(value,{stream:true});
       let i;while((i=buf.indexOf('\n\n'))>=0){
@@ -125,14 +125,16 @@ async function sendMsg(text){
         for(const line of chunk.split('\n')){
           if(!line.startsWith('data:'))continue;
           const data=line.slice(5).trim();
-          if(data==='[DONE]')break;
+          if(data==='[DONE]'){streamDone=true;break;}
           try{const o=JSON.parse(data);
             if(o.token){raw+=o.token;tp.remove();bubble.style.display='';bubble.innerHTML=md(raw);msgs.scrollTop=msgs.scrollHeight;}
             if(o.error){tp.remove();bubble.style.display='';bubble.innerHTML='⚠️ '+md(o.error);}
           }catch(e){}
         }
+        if(streamDone)break;
       }
     }
+    try{await rd.cancel();}catch(e){}
     tp.remove();
     if(!raw){bubble.style.display='';bubble.innerHTML='(tidak ada jawaban)';}
   }catch(e){
